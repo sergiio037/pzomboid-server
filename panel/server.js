@@ -15,6 +15,7 @@ const pz = require('./lib/pz');
 const mods = require('./lib/mods');
 const worlds = require('./lib/worlds');
 const settings = require('./lib/settings');
+const sandbox = require('./lib/sandbox');
 
 const app = express();
 app.disable('x-powered-by');
@@ -287,6 +288,30 @@ app.post('/api/settings', requireAuth, wrap(async (req, res) => {
     values: settings.parseIni(result.text),
     applied: result.applied,
     created: result.created,
+    skipped: result.skipped,
+  });
+}));
+
+/* ------------------------------------------------ ajustes de partida (lua) */
+
+app.get('/api/sandbox', requireAuth, wrap(async (req, res) => {
+  const { text, file } = await worlds.readConfig('sandbox');
+  ok(res, { file, items: sandbox.parseSandbox(text) });
+}));
+
+app.post('/api/sandbox', requireAuth, wrap(async (req, res) => {
+  const changes = (req.body || {}).changes;
+  if (!changes || typeof changes !== 'object') {
+    throw Object.assign(new Error('no se recibio ningun cambio'), { status: 400 });
+  }
+  const { text } = await worlds.readConfig('sandbox');
+  const result = sandbox.applySandbox(text, changes);
+  if (result.applied.length) await worlds.writeConfig('sandbox', result.text);
+
+  broadcast({ type: 'event', text: `[panel] ${result.applied.length} ajuste(s) de partida guardados (requiere reinicio)` });
+  ok(res, {
+    items: sandbox.parseSandbox(result.text),
+    applied: result.applied,
     skipped: result.skipped,
   });
 }));

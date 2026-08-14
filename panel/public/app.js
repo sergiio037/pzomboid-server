@@ -948,6 +948,127 @@ function renderSettings(values) {
     </div>`;
   }).join('');
 
+  renderCats(SETTINGS.map((g) => ({ name: g.group, n: g.items.length })));
+  refreshDirty();
+  applySettingsFilter();
+}
+
+/* ------------------------------------------------ ajustes de partida (lua) */
+
+/**
+ * Agrupacion de los SandboxVars segun la estructura de tablas del propio
+ * fichero. No hay lista de ajustes: se generan a partir de lo que trae el
+ * archivo, con sus rangos y opciones sacados de sus comentarios.
+ */
+const SB_GROUPS = [
+  { group: 'General', match: (p) => !p.includes('.') },
+  { group: 'Zombis', match: (p) => p.startsWith('ZombieLore.') },
+  { group: 'Población', match: (p) => p.startsWith('ZombieConfig.') },
+  { group: 'Habilidades', match: (p) => p.startsWith('MultiplierConfig.') },
+  { group: 'Mapa', match: (p) => p.startsWith('Map.') },
+  { group: 'Sótanos', match: (p) => p.startsWith('Basement.') },
+];
+
+/** Los que casi todo el mundo quiere tocar, con etiqueta en castellano. */
+const SB_FEATURED = {
+  MinutesPerPage: 'Minutos por página de libro',
+  LiteratureCooldown: 'Días para releer un libro con provecho',
+  'MultiplierConfig.Global': 'Multiplicador de experiencia',
+  Zombies: 'Cantidad de zombis',
+  'ZombieLore.Speed': 'Velocidad de los zombis',
+  'ZombieLore.Strength': 'Fuerza de los zombis',
+  'ZombieLore.Toughness': 'Resistencia de los zombis',
+  'ZombieLore.Cognition': 'Inteligencia de los zombis',
+  'ZombieLore.Transmission': 'Cómo se transmite la infección',
+  'ZombieLore.Mortality': 'Rapidez de la infección',
+  ZombieRespawn: 'Reaparición de zombis',
+  'ZombieConfig.PopulationMultiplier': 'Multiplicador de población',
+  DayLength: 'Duración del día',
+  StartMonth: 'Mes de inicio',
+  NightLength: 'Duración de la noche',
+  NightDarkness: 'Oscuridad nocturna',
+  WaterShut: 'Cuándo se corta el agua',
+  ElecShut: 'Cuándo se corta la luz',
+  HoursForLootRespawn: 'Horas para que reaparezca el loot',
+  StarterKit: 'Empezar con kit básico',
+  CharacterFreePoints: 'Puntos extra al crear personaje',
+  LockedHouses: 'Casas cerradas con llave',
+  Alarm: 'Frecuencia de alarmas',
+  Helicopter: 'Helicóptero',
+  MetaEvent: 'Eventos que atraen zombis',
+  EnableVehicles: 'Vehículos activados',
+  CarSpawnRate: 'Cantidad de vehículos',
+  FoodRotSpeed: 'Velocidad a la que se pudre la comida',
+  StatsDecrease: 'Velocidad de hambre, sed y cansancio',
+  Temperature: 'Temperatura global',
+  Rain: 'Frecuencia de lluvia',
+};
+
+function sandboxRow(it) {
+  const id = `sb-${it.path.replace(/\./g, '-')}`;
+  const featured = Object.prototype.hasOwnProperty.call(SB_FEATURED, it.path);
+  const label = featured ? SB_FEATURED[it.path] : it.key;
+  const val = it.type === 'bool' ? String(it.value) : String(it.value);
+  const attrs = `id="${id}" data-key="${esc(it.path)}" data-type="${it.type}" data-orig="${esc(val)}"`;
+  let control;
+
+  if (it.type === 'bool') {
+    control = `<label class="switch"><input type="checkbox" ${attrs} ${it.value ? 'checked' : ''}><i></i></label>`;
+
+  } else if (it.options && it.options.length) {
+    control = `<select class="set-input" ${attrs}>${it.options.map((o) => `
+      <option value="${esc(o.v)}"${val === String(o.v) ? ' selected' : ''}>${esc(o.v)} · ${esc(o.label)}</option>`).join('')}
+    </select>`;
+
+  } else if ((it.type === 'int' || it.type === 'float') && it.min != null && it.max != null
+             && (it.max - it.min) <= 100000) {
+    const step = it.type === 'int' ? 1 : Math.max(0.01, Number(((it.max - it.min) / 100).toFixed(2)));
+    control = `<div class="set-range">
+      <input type="range" data-slider="${esc(it.path)}" value="${esc(val)}"
+             min="${it.min}" max="${it.max}" step="${step}">
+      <input class="set-input set-num" type="number" ${attrs} value="${esc(val)}"
+             min="${it.min}" max="${it.max}" step="${step}">
+      <span class="set-unit"></span>
+    </div>`;
+
+  } else if (it.type === 'int' || it.type === 'float') {
+    control = `<input class="set-input set-num" type="number" ${attrs} value="${esc(val)}">`;
+
+  } else {
+    control = `<input class="set-input" type="text" ${attrs} value="${esc(val)}">`;
+  }
+
+  const defTxt = it.def != null ? ` · por defecto ${it.def}` : '';
+  const search = `${label} ${it.path} ${it.desc || ''}`.toLowerCase();
+
+  return `<div class="set-row" data-search="${esc(search)}"${featured ? ' data-featured="1"' : ''}>
+    <div class="set-main">
+      <label class="set-label" for="${id}">${esc(label)}${
+        featured ? '<span class="set-star" title="Ajuste destacado">★</span>' : ''}</label>
+      ${it.desc ? `<div class="set-hint">${esc(it.desc)}</div>` : ''}
+      <code class="set-key">${esc(it.path)}${esc(defTxt)}</code>
+    </div>
+    <div class="set-ctl">
+      <button class="set-reset" data-reset="${esc(it.path)}" title="Volver al valor guardado">&#8635;</button>
+      ${control}
+    </div>
+  </div>`;
+}
+
+function renderSandbox(items) {
+  const cats = [];
+  $('#settings-groups').innerHTML = SB_GROUPS.map((g) => {
+    const rows = items.filter((it) => g.match(it.path));
+    if (!rows.length) return '';
+    cats.push({ name: g.group, n: rows.length });
+    return `<div class="card" data-cat="${esc(g.group)}">
+      <div class="card-head"><h3>${esc(g.group)}</h3><span class="count">${rows.length}</span></div>
+      <div class="set-list">${rows.map(sandboxRow).join('')}</div>
+    </div>`;
+  }).join('');
+
+  const featured = items.filter((it) => it.path in SB_FEATURED).length;
+  renderCats(cats, featured);
   refreshDirty();
   applySettingsFilter();
 }
@@ -999,6 +1120,19 @@ $('#settings-groups').addEventListener('click', (e) => {
 /* ------------------------------------------------------------- filtros */
 
 let settingsCat = 'Todos';
+let settingsSource = 'ini';
+
+/** Pastillas de categoria. `featured` > 0 añade la de destacados. */
+function renderCats(cats, featured = 0) {
+  const all = cats.reduce((a, c) => a + c.n, 0);
+  const list = [{ name: 'Todos', n: all }, ...cats];
+  if (featured) list.unshift({ name: 'Destacados', n: featured });
+  if (!list.some((c) => c.name === settingsCat)) settingsCat = list[0].name;
+
+  $('#settings-cats').innerHTML = list.map((c) => `
+    <button class="set-cat${c.name === settingsCat ? ' is-active' : ''}"
+            data-cat="${esc(c.name)}">${esc(c.name)}<i>${c.n}</i></button>`).join('');
+}
 
 function applySettingsFilter() {
   const q = $('#settings-search').value.trim().toLowerCase();
@@ -1006,10 +1140,13 @@ function applySettingsFilter() {
   let total = 0;
 
   $$('#settings-groups .card').forEach((card) => {
-    const inCat = settingsCat === 'Todos' || card.dataset.cat === settingsCat;
+    const inCat = settingsCat === 'Todos'
+      || settingsCat === 'Destacados'
+      || card.dataset.cat === settingsCat;
     let shown = 0;
     $$('.set-row', card).forEach((row) => {
       const show = inCat
+        && (settingsCat !== 'Destacados' || row.dataset.featured === '1')
         && (!q || row.dataset.search.includes(q))
         && (!onlyDirty || row.classList.contains('is-dirty'));
       row.classList.toggle('hidden', !show);
@@ -1022,14 +1159,6 @@ function applySettingsFilter() {
   $('#settings-empty').classList.toggle('hidden', total > 0);
 }
 
-$('#settings-cats').innerHTML = ['Todos', ...SETTINGS.map((g) => g.group)]
-  .map((c, i) => {
-    const n = c === 'Todos'
-      ? SETTINGS.reduce((a, g) => a + g.items.length, 0)
-      : SETTINGS.find((g) => g.group === c).items.length;
-    return `<button class="set-cat${i === 0 ? ' is-active' : ''}" data-cat="${esc(c)}">${esc(c)}<i>${n}</i></button>`;
-  }).join('');
-
 $('#settings-cats').addEventListener('click', (e) => {
   const b = e.target.closest('.set-cat');
   if (!b) return;
@@ -1041,13 +1170,25 @@ $('#settings-cats').addEventListener('click', (e) => {
 $('#settings-search').addEventListener('input', applySettingsFilter);
 $('#settings-onlydirty').addEventListener('change', applySettingsFilter);
 
+$('#settings-src').addEventListener('click', (e) => {
+  const t = e.target.closest('.tab');
+  if (!t || t.dataset.src === settingsSource) return;
+  settingsSource = t.dataset.src;
+  settingsCat = 'Todos';
+  $$('#settings-src .tab').forEach((x) => x.classList.toggle('is-active', x === t));
+  loadSettings();
+});
+
 /* -------------------------------------------------------- carga y guardado */
 
 async function loadSettings() {
+  $('#settings-groups').innerHTML = '<p class="empty">cargando…</p>';
   try {
-    renderSettings((await api('/api/settings')).values);
+    if (settingsSource === 'sandbox') renderSandbox((await api('/api/sandbox')).items);
+    else renderSettings((await api('/api/settings')).values);
   } catch (e) {
     $('#settings-groups').innerHTML = `<p class="empty">${esc(e.message)}</p>`;
+    $('#settings-cats').innerHTML = '';
   }
 }
 
@@ -1066,11 +1207,17 @@ $('#settings-save').addEventListener('click', async () => {
   const btn = $('#settings-save');
   btn.disabled = true; btn.textContent = 'Guardando…';
   try {
-    const r = await jpost('/api/settings', { changes });
-    renderSettings(r.values);
-    const n = r.applied.length + r.created.length;
-    toast(`${n} ajuste(s) guardados. Reinicia para aplicarlos.`, 'ok');
-    if (r.skipped.length) toast(`Sin efecto: ${r.skipped.join(', ')}`, 'warn');
+    if (settingsSource === 'sandbox') {
+      const r = await jpost('/api/sandbox', { changes });
+      renderSandbox(r.items);
+      toast(`${r.applied.length} ajuste(s) de partida guardados. Reinicia para aplicarlos.`, 'ok');
+      if (r.skipped.length) toast(`Sin efecto: ${r.skipped.join(', ')}`, 'warn');
+    } else {
+      const r = await jpost('/api/settings', { changes });
+      renderSettings(r.values);
+      toast(`${r.applied.length + r.created.length} ajuste(s) guardados. Reinicia para aplicarlos.`, 'ok');
+      if (r.skipped.length) toast(`Sin efecto: ${r.skipped.join(', ')}`, 'warn');
+    }
   } catch (e) {
     toast(e.message, 'err');
   } finally {

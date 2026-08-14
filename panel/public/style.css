@@ -350,6 +350,7 @@ em{ font-style:normal; color:var(--txt); }
   content:""; position:absolute; left:-1px; right:-1px; bottom:100%;
   height:24px; background:var(--bg);
 }
+.set-src{ margin-bottom:11px; padding-bottom:11px; border-bottom:1px solid var(--line-soft); }
 .set-bar-top{ display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap; }
 .set-bar-right{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 
@@ -410,6 +411,7 @@ em{ font-style:normal; color:var(--txt); }
   font-size:9.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
   background:#3a2f10; color:#e9c469; border:1px solid #4d3d14;
 }
+.set-star{ margin-left:6px; color:var(--amber); font-size:11px; vertical-align:1px; }
 .set-row.is-missing .set-label{ color:var(--txt-dim); }
 .set-row.is-missing .set-key{ color:#6b5a2e; }
 
