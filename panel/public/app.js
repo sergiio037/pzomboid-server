@@ -147,6 +147,54 @@ document.addEventListener('click', (e) => {
   if (b) goto(b.dataset.goto);
 });
 
+/* ==================================================== datos de conexion == */
+
+let endpoint = { ip: null, port: '16261', hasPassword: false };
+
+function paintEndpoint(ep) {
+  endpoint = {
+    // sin metadatos de GCP caemos al host del propio panel: es la misma maquina
+    ip: (ep && ep.ip) || location.hostname,
+    port: (ep && ep.port) || '16261',
+    hasPassword: Boolean(ep && ep.hasPassword),
+  };
+  const addr = `${endpoint.ip}:${endpoint.port}`;
+  $('#connect-addr').textContent = addr;
+  $('#connect-steam').href = `steam://connect/${addr}`;
+  $('#connect-note').textContent = endpoint.hasPassword
+    ? 'El servidor pide contraseña: te la pedirá al entrar.'
+    : 'En el juego: Unirse a servidor → Añadir servidor';
+}
+
+/**
+ * navigator.clipboard solo existe en contextos seguros (HTTPS o localhost).
+ * Este panel va por HTTP sobre una IP, asi que hace falta el metodo antiguo.
+ */
+async function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    try { await navigator.clipboard.writeText(text); return true; } catch { /* fallback */ }
+  }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    const done = document.execCommand('copy');
+    ta.remove();
+    return done;
+  } catch { return false; }
+}
+
+async function copyAndTell(text) {
+  const done = await copyText(text);
+  toast(done ? `Copiado: ${text}` : 'No se pudo copiar, selecciónalo a mano', done ? 'ok' : 'err');
+}
+
+$('#copy-addr').addEventListener('click', () => copyAndTell(`${endpoint.ip}:${endpoint.port}`));
+$('#copy-ip').addEventListener('click', () => copyAndTell(endpoint.ip));
+
 /* ============================================================ estado ==== */
 
 let statusTimer = null;
@@ -166,6 +214,8 @@ function paintState(st) {
   const [cls, label] = map[st.state] || ['', st.state || 'desconocido'];
   if (cls) pill.classList.add(cls);
   txt.textContent = label;
+
+  paintEndpoint(st.endpoint);
 
   $('#ov-state').textContent = label;
   $('#ov-substate').textContent = `systemd: ${st.state}`;

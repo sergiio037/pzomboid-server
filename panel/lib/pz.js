@@ -4,7 +4,7 @@ const fs = require('fs');
 const fsp = fs.promises;
 const os = require('os');
 const path = require('path');
-const { CFG, run, sleep, exists } = require('./util');
+const { CFG, run, sleep, exists, iniGet } = require('./util');
 
 const JAVA_PATTERN = 'zombie.network.GameServer';
 const ANSI_RE = /\[[0-9;?]*[A-Za-z]/g;
@@ -49,6 +49,39 @@ async function hostStats() {
     diskFree: avail,
     uptimeSec: Math.round(os.uptime()),
   };
+}
+
+/* ------------------------------------------------------- datos de conexion */
+
+let cachedIp = null;
+
+/**
+ * IP publica de la VM. La pedimos al servidor de metadatos de GCP, que es la
+ * fuente autoritativa; si no estamos en GCP devolvemos null y el navegador
+ * cae a location.hostname, que para este panel es la misma direccion.
+ */
+async function publicIp() {
+  if (cachedIp) return cachedIp;
+  const r = await run('curl', [
+    '-fsS', '-m', '3', '-H', 'Metadata-Flavor: Google',
+    'http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip',
+  ], { timeout: 5000 });
+  const ip = r.stdout.trim();
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) { cachedIp = ip; return ip; }
+  return null;
+}
+
+async function endpoint() {
+  let port = '16261';
+  let hasPassword = false;
+  let publicName = '';
+  try {
+    const ini = await fsp.readFile(CFG.iniFile, 'utf8');
+    port = iniGet(ini, 'DefaultPort') || port;
+    hasPassword = Boolean(iniGet(ini, 'Password'));
+    publicName = iniGet(ini, 'PublicName');
+  } catch { /* el .ini aparece tras el primer arranque */ }
+  return { ip: await publicIp(), port, hasPassword, publicName };
 }
 
 /* ---------------------------------------------------------------- consola */
@@ -188,11 +221,14 @@ async function queryPlayers(tailer) {
 /* ----------------------------------------------------------------- estado */
 
 async function fullStatus(tailer) {
-  const [state, pid, host] = await Promise.all([unitState(), javaPid(), hostStats()]);
+  const [state, pid, host, conn] = await Promise.all([
+    unitState(), javaPid(), hostStats(), endpoint(),
+  ]);
   const proc = await procStats(pid);
   return {
     unit: CFG.unit,
     serverName: CFG.serverName,
+    endpoint: conn,
     state,                                  // active | inactive | failed | activating
     running: state === 'active',
     ready: Boolean(pid) && await exists(process.env.PZ_FIFO || ''),
@@ -205,5 +241,5 @@ async function fullStatus(tailer) {
 
 module.exports = {
   ConsoleTail, sendCommand, power, queryPlayers,
-  fullStatus, unitState, javaPid, hostStats,
+  fullStatus, unitState, javaPid, hostStats, endpoint,
 };
