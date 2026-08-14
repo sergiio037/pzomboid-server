@@ -118,12 +118,34 @@ step "5/11  Descargando Project Zomboid Dedicated Server (appid ${PZ_APPID})"
 echo "    esto tarda varios minutos, es ~4 GB..."
 BETA_ARGS=()
 [[ "$PZ_BRANCH" == "unstable" ]] && BETA_ARGS=(-beta unstable)
-sudo -u "$SYS_USER" HOME="$SYS_HOME" "${STEAMCMD_DIR}/steamcmd.sh" \
-    +force_install_dir "$PZ_SERVER_DIR" \
-    +login anonymous \
-    +app_update "$PZ_APPID" "${BETA_ARGS[@]}" validate \
-    +quit
-[[ -f "${PZ_SERVER_DIR}/start-server.sh" ]] || die "start-server.sh no aparecio; revisa la salida de steamcmd"
+# En la primera ejecucion SteamCMD se auto-actualiza y se reinicia, perdiendo
+# el comando pendiente: falla con "Missing configuration". A partir del segundo
+# intento ya esta actualizado, asi que reintentamos en vez de abortar.
+STEAM_OK=0
+for attempt in 1 2 3; do
+    echo "    intento ${attempt}/3..."
+    if sudo -u "$SYS_USER" HOME="$SYS_HOME" "${STEAMCMD_DIR}/steamcmd.sh" \
+            +force_install_dir "$PZ_SERVER_DIR" \
+            +login anonymous \
+            +app_update "$PZ_APPID" "${BETA_ARGS[@]}" validate \
+            +quit
+    then
+        [[ -f "${PZ_SERVER_DIR}/start-server.sh" ]] && { STEAM_OK=1; break; }
+    fi
+    (( attempt < 3 )) && { warn "steamcmd fallo, reintentando en 10 s..."; sleep 10; }
+done
+
+if (( ! STEAM_OK )); then
+    die "SteamCMD no pudo descargar el appid ${PZ_APPID} tras 3 intentos.
+    Si el error es 'Missing configuration', prueba a descargarlo con una cuenta
+    de Steam que tenga Project Zomboid en su biblioteca:
+
+      sudo -u ${SYS_USER} HOME=${SYS_HOME} ${STEAMCMD_DIR}/steamcmd.sh \\
+          +force_install_dir ${PZ_SERVER_DIR} +login TU_USUARIO_STEAM \\
+          +app_update ${PZ_APPID} validate +quit
+
+    y vuelve a lanzar install.sh cuando termine."
+fi
 chmod +x "${PZ_SERVER_DIR}"/*.sh 2>/dev/null || true
 ok "servidor instalado en ${PZ_SERVER_DIR}"
 
