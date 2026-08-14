@@ -160,11 +160,22 @@ function paintEndpoint(ep) {
   };
   const addr = `${endpoint.ip}:${endpoint.port}`;
   $('#connect-addr').textContent = addr;
-  $('#connect-steam').href = `steam://connect/${addr}`;
   $('#connect-note').textContent = endpoint.hasPassword
-    ? 'El servidor pide contraseña: te la pedirá al entrar.'
-    : 'En el juego: Unirse a servidor → Añadir servidor';
+    ? 'Pégala en Unirse a servidor → Añadir servidor. El servidor pide contraseña.'
+    : 'Pégala en el juego: Unirse a servidor → Añadir servidor';
 }
+
+/**
+ * steam://connect/IP:PUERTO no sirve para Zomboid: Steam busca el servidor en
+ * su lista maestra y, si no esta publicado, cierra la ventana sin hacer nada.
+ * Copiamos la direccion y lanzamos el juego, que es lo unico fiable.
+ */
+$('#connect-steam').addEventListener('click', async () => {
+  const addr = `${endpoint.ip}:${endpoint.port}`;
+  const done = await copyText(addr);
+  toast(done ? `${addr} copiado. Abriendo el juego…` : 'Abriendo el juego…', 'ok');
+  window.location.href = 'steam://rungameid/108600';
+});
 
 /**
  * navigator.clipboard solo existe en contextos seguros (HTTPS o localhost).
