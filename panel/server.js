@@ -278,13 +278,15 @@ app.post('/api/settings', requireAuth, wrap(async (req, res) => {
     throw Object.assign(new Error('no se recibio ningun cambio'), { status: 400 });
   }
   const { text } = await worlds.readConfig('ini');
-  const result = settings.applyIni(text, changes);
-  if (result.applied.length) await worlds.writeConfig('ini', result.text);
+  const result = settings.applyIni(text, changes, { allowCreate: true });
+  const touched = result.applied.length + result.created.length;
+  if (touched) await worlds.writeConfig('ini', result.text);
 
-  broadcast({ type: 'event', text: `[panel] ${result.applied.length} ajuste(s) guardados (requiere reinicio)` });
+  broadcast({ type: 'event', text: `[panel] ${touched} ajuste(s) guardados (requiere reinicio)` });
   ok(res, {
     values: settings.parseIni(result.text),
     applied: result.applied,
+    created: result.created,
     skipped: result.skipped,
   });
 }));

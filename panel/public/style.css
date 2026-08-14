@@ -364,6 +364,13 @@ em{ font-style:normal; color:var(--txt); }
   color:#5c664f; font-family:var(--mono);
 }
 .set-ctl{ flex:none; display:flex; align-items:center; }
+.set-new{
+  margin-left:7px; padding:1px 6px; border-radius:99px; vertical-align:1px;
+  font-size:9.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
+  background:#3a2f10; color:#e9c469; border:1px solid #4d3d14;
+}
+.set-row.is-missing .set-label{ color:var(--txt-dim); }
+.set-row.is-missing .set-key{ color:#6b5a2e; }
 
 .set-input{
   padding:7px 10px; font:inherit; font-size:12.8px; color:var(--txt);

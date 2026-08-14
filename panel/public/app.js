@@ -700,74 +700,78 @@ $('#backup-list').addEventListener('click', async (e) => {
 /* ============================================================ ajustes === */
 
 /**
- * Ajustes que el panel muestra con controles. Solo se pinta la fila si la
- * clave existe de verdad en el .ini del servidor, asi que sobra con que la
- * lista sea generosa: lo que tu version no tenga, simplemente no aparece.
+ * Ajustes que el panel muestra con controles. `def` es el valor por defecto de
+ * Project Zomboid, y se usa cuando la clave no esta escrita en el .ini: el
+ * servidor genera el fichero sin algunas opciones y entonces tira de su valor
+ * interno. Esas filas salen marcadas como "nuevo" y solo se escriben en el
+ * fichero si de verdad las cambias.
  */
 const SETTINGS = [
   {
     group: 'Servidor',
     items: [
-      { key: 'PublicName', type: 'text', label: 'Nombre público',
+      { key: 'PublicName', type: 'text', label: 'Nombre público', def: 'My PZ Server',
         hint: 'Cómo aparece en la lista de servidores' },
-      { key: 'PublicDescription', type: 'text', label: 'Descripción' },
-      { key: 'Password', type: 'text', label: 'Contraseña del servidor',
+      { key: 'PublicDescription', type: 'text', label: 'Descripción', def: '' },
+      { key: 'Password', type: 'text', label: 'Contraseña del servidor', def: '',
         hint: 'Vacío = entra cualquiera', placeholder: 'sin contraseña' },
-      { key: 'MaxPlayers', type: 'number', label: 'Jugadores máximos', min: 1, max: 100,
+      { key: 'MaxPlayers', type: 'number', label: 'Jugadores máximos', def: '32', min: 1, max: 100,
         hint: 'Con 8 GB de RAM, 16 va sobrado' },
-      { key: 'Public', type: 'bool', label: 'Listar públicamente',
+      { key: 'Public', type: 'bool', label: 'Listar públicamente', def: 'false',
         hint: 'Aparece en Unirse a servidor → Internet' },
-      { key: 'Open', type: 'bool', label: 'Entrada libre',
+      { key: 'Open', type: 'bool', label: 'Entrada libre', def: 'true',
         hint: 'Si lo apagas, solo entra quien esté en la lista blanca' },
-      { key: 'PVP', type: 'bool', label: 'PvP entre jugadores' },
+      { key: 'PVP', type: 'bool', label: 'PvP entre jugadores', def: 'true' },
     ],
   },
   {
     group: 'Jugadores',
     items: [
-      { key: 'MapRemotePlayerVisibility', type: 'select', label: 'Verse en el mapa',
+      { key: 'MapRemotePlayerVisibility', type: 'select', label: 'Verse en el mapa', def: '1',
         hint: 'Marcadores del resto al abrir el mapa con M',
         options: [
           { v: '1', label: 'Nadie' },
           { v: '2', label: 'Solo facción' },
           { v: '3', label: 'Todos' },
         ] },
-      { key: 'DisplayUserName', type: 'bool', label: 'Nombre sobre el personaje' },
-      { key: 'ShowFirstAndLastName', type: 'bool', label: 'Nombre y apellido' },
-      { key: 'Faction', type: 'bool', label: 'Permitir facciones' },
-      { key: 'AllowCoop', type: 'bool', label: 'Pantalla dividida' },
-      { key: 'SafetySystem', type: 'bool', label: 'Sistema de seguridad PvP',
+      { key: 'DisplayUserName', type: 'bool', label: 'Nombre sobre el personaje', def: 'true' },
+      { key: 'ShowFirstAndLastName', type: 'bool', label: 'Nombre y apellido', def: 'false' },
+      { key: 'Faction', type: 'bool', label: 'Permitir facciones', def: 'true' },
+      { key: 'AllowCoop', type: 'bool', label: 'Pantalla dividida', def: 'true' },
+      { key: 'SafetySystem', type: 'bool', label: 'Sistema de seguridad PvP', def: 'true',
         hint: 'Evita golpear a otros sin activarlo antes' },
-      { key: 'AnnounceDeath', type: 'bool', label: 'Anunciar muertes en el chat' },
-      { key: 'GlobalChat', type: 'bool', label: 'Chat global' },
+      { key: 'AnnounceDeath', type: 'bool', label: 'Anunciar muertes en el chat', def: 'false' },
+      { key: 'GlobalChat', type: 'bool', label: 'Chat global', def: 'true' },
     ],
   },
   {
     group: 'Partida',
     items: [
       { key: 'MinutesPerPage', type: 'number', label: 'Minutos por página de libro',
-        step: 0.1, min: 0, max: 60,
+        def: '1.0', step: 0.1, min: 0, max: 60,
         hint: '1 es lo normal · 0.5 el doble de rápido · 0.1 casi instantáneo' },
       { key: 'HoursForLootRespawn', type: 'number', label: 'Horas para que reaparezca el loot',
-        min: 0, hint: '0 = nunca reaparece' },
+        def: '0', min: 0, hint: '0 = nunca reaparece' },
       { key: 'SpeedLimit', type: 'number', label: 'Velocidad máxima de vehículos',
-        min: 10, max: 150, hint: 'En km/h' },
-      { key: 'SleepAllowed', type: 'bool', label: 'Permitir dormir' },
-      { key: 'SleepNeeded', type: 'bool', label: 'El cansancio afecta' },
-      { key: 'NoFire', type: 'bool', label: 'Desactivar el fuego',
+        def: '70.0', min: 10, max: 150, hint: 'En km/h' },
+      { key: 'SleepAllowed', type: 'bool', label: 'Permitir dormir', def: 'false' },
+      { key: 'SleepNeeded', type: 'bool', label: 'El cansancio afecta', def: 'false' },
+      { key: 'NoFire', type: 'bool', label: 'Desactivar el fuego', def: 'false',
         hint: 'Impide incendios que arrasen el mapa' },
-      { key: 'PauseEmpty', type: 'bool', label: 'Pausar si no hay nadie',
+      { key: 'PauseEmpty', type: 'bool', label: 'Pausar si no hay nadie', def: 'true',
         hint: 'El tiempo no corre con el servidor vacío' },
     ],
   },
   {
     group: 'Guardado y copias',
     items: [
-      { key: 'SaveWorldEveryMinutes', type: 'number', label: 'Guardar cada X minutos', min: 0 },
-      { key: 'BackupsCount', type: 'number', label: 'Copias a conservar', min: 0, max: 50 },
-      { key: 'BackupsOnStart', type: 'bool', label: 'Copia al arrancar' },
-      { key: 'BackupsOnVersionChange', type: 'bool', label: 'Copia al cambiar de versión' },
-      { key: 'BackupsPeriod', type: 'number', label: 'Copia periódica (minutos)', min: 0 },
+      { key: 'SaveWorldEveryMinutes', type: 'number', label: 'Guardar cada X minutos',
+        def: '0', min: 0 },
+      { key: 'BackupsCount', type: 'number', label: 'Copias a conservar',
+        def: '5', min: 0, max: 50 },
+      { key: 'BackupsOnStart', type: 'bool', label: 'Copia al arrancar', def: 'true' },
+      { key: 'BackupsOnVersionChange', type: 'bool', label: 'Copia al cambiar de versión', def: 'true' },
+      { key: 'BackupsPeriod', type: 'number', label: 'Copia periódica (minutos)', def: '0', min: 0 },
     ],
   },
 ];
@@ -799,9 +803,10 @@ const COMMANDS = [
   { c: 'quit', d: 'Guarda y apaga el servidor' },
 ];
 
-function settingRow(it, raw) {
+function settingRow(it, raw, missing) {
   const id = `set-${it.key}`;
-  const attrs = `id="${id}" data-key="${esc(it.key)}" data-type="${it.type}"`;
+  const attrs = `id="${id}" data-key="${esc(it.key)}" data-type="${it.type}"`
+    + ` data-def="${esc(it.def)}"${missing ? ' data-missing="1"' : ''}`;
   let control;
 
   if (it.type === 'bool') {
@@ -819,9 +824,10 @@ function settingRow(it, raw) {
       placeholder="${esc(it.placeholder || '')}">`;
   }
 
-  return `<div class="set-row">
+  return `<div class="set-row${missing ? ' is-missing' : ''}">
     <div class="set-main">
-      <label class="set-label" for="${id}">${esc(it.label)}</label>
+      <label class="set-label" for="${id}">${esc(it.label)}${
+        missing ? '<span class="set-new" title="No está en tu .ini; se añadirá si lo cambias">nuevo</span>' : ''}</label>
       ${it.hint ? `<div class="set-hint">${esc(it.hint)}</div>` : ''}
       <code class="set-key">${esc(it.key)}</code>
     </div>
@@ -831,17 +837,17 @@ function settingRow(it, raw) {
 
 function renderSettings(values) {
   const html = SETTINGS.map((g) => {
-    const rows = g.items.filter((it) => it.key in values)
-      .map((it) => settingRow(it, values[it.key])).join('');
-    if (!rows) return '';
+    const rows = g.items.map((it) => {
+      const missing = !(it.key in values);
+      return settingRow(it, missing ? it.def : values[it.key], missing);
+    }).join('');
     return `<div class="card">
       <div class="card-head"><h3>${esc(g.group)}</h3></div>
       <div class="set-list">${rows}</div>
     </div>`;
   }).join('');
 
-  $('#settings-groups').innerHTML = html
-    || '<p class="empty">No se pudo leer el .ini. ¿Has arrancado el servidor al menos una vez?</p>';
+  $('#settings-groups').innerHTML = html;
 }
 
 async function loadSettings() {
@@ -857,15 +863,21 @@ $('#settings-reload').addEventListener('click', loadSettings);
 $('#settings-save').addEventListener('click', async () => {
   const changes = {};
   $$('#settings-groups [data-key]').forEach((el) => {
-    changes[el.dataset.key] = el.dataset.type === 'bool' ? String(el.checked) : el.value.trim();
+    const value = el.dataset.type === 'bool' ? String(el.checked) : el.value.trim();
+    // una fila "nueva" sin tocar no se escribe: no ensuciamos el .ini con
+    // lineas que solo repiten el valor por defecto del servidor
+    if (el.dataset.missing === '1' && value === el.dataset.def) return;
+    changes[el.dataset.key] = value;
   });
   if (!Object.keys(changes).length) return toast('No hay nada que guardar', 'warn');
 
   try {
     const r = await jpost('/api/settings', { changes });
     renderSettings(r.values);
-    toast(`${r.applied.length} ajustes guardados. Reinicia para aplicarlos.`, 'ok');
-    if (r.skipped.length) toast(`Sin efecto (no existen en tu .ini): ${r.skipped.join(', ')}`, 'warn');
+    const n = r.applied.length + r.created.length;
+    toast(`${n} ajustes guardados. Reinicia para aplicarlos.`, 'ok');
+    if (r.created.length) toast(`Añadidos al .ini: ${r.created.join(', ')}`, 'ok');
+    if (r.skipped.length) toast(`Sin efecto: ${r.skipped.join(', ')}`, 'warn');
   } catch (e) { toast(e.message, 'err'); }
 });
 
