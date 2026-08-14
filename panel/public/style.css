@@ -337,6 +337,55 @@ em{ font-style:normal; color:var(--txt); }
 }
 .tactions{ display:flex; gap:6px; }
 
+/* ----------------------------------------------------------- ajustes --- */
+.set-bar{
+  display:flex; align-items:center; justify-content:space-between; gap:16px;
+  padding:14px 18px; margin-bottom:14px;
+  background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+}
+.set-bar h3{ font-size:13.5px; }
+.set-bar .hint{ margin:2px 0 0; }
+
+.set-groups{
+  display:grid; grid-template-columns:repeat(auto-fit, minmax(340px,1fr));
+  gap:14px; margin-bottom:14px; align-items:start;
+}
+.set-list{ display:grid; gap:2px; }
+.set-row{
+  display:flex; align-items:center; justify-content:space-between; gap:16px;
+  padding:11px 2px; border-bottom:1px solid var(--line-soft);
+}
+.set-row:last-child{ border-bottom:0; }
+.set-main{ min-width:0; }
+.set-label{ display:block; font-size:13px; font-weight:600; cursor:pointer; }
+.set-hint{ font-size:11.8px; color:var(--txt-mute); margin-top:2px; }
+.set-key{
+  display:inline-block; margin-top:4px; font-size:10.5px;
+  color:#5c664f; font-family:var(--mono);
+}
+.set-ctl{ flex:none; display:flex; align-items:center; }
+
+.set-input{
+  padding:7px 10px; font:inherit; font-size:12.8px; color:var(--txt);
+  background:#0d100b; border:1px solid var(--line); border-radius:var(--radius-sm);
+  outline:none; min-width:150px; transition:border-color .15s, box-shadow .15s;
+}
+.set-input:focus{ border-color:var(--accent-dk); box-shadow:0 0 0 3px rgba(159,197,72,.11); }
+.set-num{ min-width:92px; width:92px; text-align:right; font-family:var(--mono); }
+select.set-input{ cursor:pointer; }
+select.set-input option{ background:var(--panel-2); color:var(--txt); }
+
+/* ---------------------------------------------------------- comandos --- */
+.cmd-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(290px,1fr)); gap:7px; }
+.cmd{
+  display:block; width:100%; text-align:left; cursor:pointer;
+  padding:9px 12px; border:1px solid var(--line-soft); border-radius:var(--radius-sm);
+  background:var(--panel-2); color:var(--txt); font:inherit; transition:.14s;
+}
+.cmd:hover{ border-color:var(--accent-dk); background:#1a2114; }
+.cmd b{ display:block; font-family:var(--mono); font-size:12.4px; color:var(--accent); font-weight:600; }
+.cmd span{ display:block; font-size:11.8px; color:var(--txt-mute); margin-top:2px; }
+
 /* ------------------------------------------------------------ editor --- */
 .editor{
   display:block; width:100%; height:calc(100vh - 236px); resize:none;

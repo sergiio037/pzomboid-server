@@ -14,6 +14,7 @@ const { CFG, run, verifyPassword, safeRelPath } = require('./lib/util');
 const pz = require('./lib/pz');
 const mods = require('./lib/mods');
 const worlds = require('./lib/worlds');
+const settings = require('./lib/settings');
 
 const app = express();
 app.disable('x-powered-by');
@@ -262,6 +263,30 @@ app.get('/api/backups/:name/download', requireAuth, wrap(async (req, res) => {
 app.delete('/api/backups/:name', requireAuth, wrap(async (req, res) => {
   await worlds.deleteBackup(req.params.name);
   ok(res, { backups: await worlds.listBackups() });
+}));
+
+/* ------------------------------------------------------- ajustes visuales */
+
+app.get('/api/settings', requireAuth, wrap(async (req, res) => {
+  const { text } = await worlds.readConfig('ini');
+  ok(res, { values: settings.parseIni(text) });
+}));
+
+app.post('/api/settings', requireAuth, wrap(async (req, res) => {
+  const changes = (req.body || {}).changes;
+  if (!changes || typeof changes !== 'object') {
+    throw Object.assign(new Error('no se recibio ningun cambio'), { status: 400 });
+  }
+  const { text } = await worlds.readConfig('ini');
+  const result = settings.applyIni(text, changes);
+  if (result.applied.length) await worlds.writeConfig('ini', result.text);
+
+  broadcast({ type: 'event', text: `[panel] ${result.applied.length} ajuste(s) guardados (requiere reinicio)` });
+  ok(res, {
+    values: settings.parseIni(result.text),
+    applied: result.applied,
+    skipped: result.skipped,
+  });
 }));
 
 /* --------------------------------------------------------- configuracion */

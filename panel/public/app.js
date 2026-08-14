@@ -124,7 +124,7 @@ $('#logout-btn').addEventListener('click', async () => {
 
 const TITLES = {
   overview: 'Resumen', console: 'Consola', mods: 'Mods',
-  worlds: 'Mundos', config: 'Configuración',
+  worlds: 'Mundos', settings: 'Ajustes', config: 'Configuración',
 };
 
 function goto(view) {
@@ -134,6 +134,7 @@ function goto(view) {
   location.hash = view;
   if (view === 'mods') loadMods();
   if (view === 'worlds') loadWorlds();
+  if (view === 'settings') loadSettings();
   if (view === 'config') loadConfig(cfgKind);
   if (view === 'console') scrollConsole(true);
 }
@@ -694,6 +695,193 @@ $('#backup-list').addEventListener('click', async (e) => {
   try { await jdel(`/api/backups/${encodeURIComponent(b.dataset.delBackup)}`); }
   catch (err) { toast(err.message, 'err'); }
   loadWorlds();
+});
+
+/* ============================================================ ajustes === */
+
+/**
+ * Ajustes que el panel muestra con controles. Solo se pinta la fila si la
+ * clave existe de verdad en el .ini del servidor, asi que sobra con que la
+ * lista sea generosa: lo que tu version no tenga, simplemente no aparece.
+ */
+const SETTINGS = [
+  {
+    group: 'Servidor',
+    items: [
+      { key: 'PublicName', type: 'text', label: 'Nombre público',
+        hint: 'Cómo aparece en la lista de servidores' },
+      { key: 'PublicDescription', type: 'text', label: 'Descripción' },
+      { key: 'Password', type: 'text', label: 'Contraseña del servidor',
+        hint: 'Vacío = entra cualquiera', placeholder: 'sin contraseña' },
+      { key: 'MaxPlayers', type: 'number', label: 'Jugadores máximos', min: 1, max: 100,
+        hint: 'Con 8 GB de RAM, 16 va sobrado' },
+      { key: 'Public', type: 'bool', label: 'Listar públicamente',
+        hint: 'Aparece en Unirse a servidor → Internet' },
+      { key: 'Open', type: 'bool', label: 'Entrada libre',
+        hint: 'Si lo apagas, solo entra quien esté en la lista blanca' },
+      { key: 'PVP', type: 'bool', label: 'PvP entre jugadores' },
+    ],
+  },
+  {
+    group: 'Jugadores',
+    items: [
+      { key: 'MapRemotePlayerVisibility', type: 'select', label: 'Verse en el mapa',
+        hint: 'Marcadores del resto al abrir el mapa con M',
+        options: [
+          { v: '1', label: 'Nadie' },
+          { v: '2', label: 'Solo facción' },
+          { v: '3', label: 'Todos' },
+        ] },
+      { key: 'DisplayUserName', type: 'bool', label: 'Nombre sobre el personaje' },
+      { key: 'ShowFirstAndLastName', type: 'bool', label: 'Nombre y apellido' },
+      { key: 'Faction', type: 'bool', label: 'Permitir facciones' },
+      { key: 'AllowCoop', type: 'bool', label: 'Pantalla dividida' },
+      { key: 'SafetySystem', type: 'bool', label: 'Sistema de seguridad PvP',
+        hint: 'Evita golpear a otros sin activarlo antes' },
+      { key: 'AnnounceDeath', type: 'bool', label: 'Anunciar muertes en el chat' },
+      { key: 'GlobalChat', type: 'bool', label: 'Chat global' },
+    ],
+  },
+  {
+    group: 'Partida',
+    items: [
+      { key: 'MinutesPerPage', type: 'number', label: 'Minutos por página de libro',
+        step: 0.1, min: 0, max: 60,
+        hint: '1 es lo normal · 0.5 el doble de rápido · 0.1 casi instantáneo' },
+      { key: 'HoursForLootRespawn', type: 'number', label: 'Horas para que reaparezca el loot',
+        min: 0, hint: '0 = nunca reaparece' },
+      { key: 'SpeedLimit', type: 'number', label: 'Velocidad máxima de vehículos',
+        min: 10, max: 150, hint: 'En km/h' },
+      { key: 'SleepAllowed', type: 'bool', label: 'Permitir dormir' },
+      { key: 'SleepNeeded', type: 'bool', label: 'El cansancio afecta' },
+      { key: 'NoFire', type: 'bool', label: 'Desactivar el fuego',
+        hint: 'Impide incendios que arrasen el mapa' },
+      { key: 'PauseEmpty', type: 'bool', label: 'Pausar si no hay nadie',
+        hint: 'El tiempo no corre con el servidor vacío' },
+    ],
+  },
+  {
+    group: 'Guardado y copias',
+    items: [
+      { key: 'SaveWorldEveryMinutes', type: 'number', label: 'Guardar cada X minutos', min: 0 },
+      { key: 'BackupsCount', type: 'number', label: 'Copias a conservar', min: 0, max: 50 },
+      { key: 'BackupsOnStart', type: 'bool', label: 'Copia al arrancar' },
+      { key: 'BackupsOnVersionChange', type: 'bool', label: 'Copia al cambiar de versión' },
+      { key: 'BackupsPeriod', type: 'number', label: 'Copia periódica (minutos)', min: 0 },
+    ],
+  },
+];
+
+const COMMANDS = [
+  { c: 'players', d: 'Lista los jugadores conectados' },
+  { c: 'save', d: 'Guarda el mundo ahora mismo' },
+  { c: 'servermsg "texto"', d: 'Mensaje en pantalla para todos' },
+  { c: 'kick "usuario"', d: 'Expulsa a un jugador' },
+  { c: 'banuser "usuario"', d: 'Banea por nombre de usuario' },
+  { c: 'unbanuser "usuario"', d: 'Le quita el baneo' },
+  { c: 'grantadmin "usuario"', d: 'Le da permisos de administrador' },
+  { c: 'removeadmin "usuario"', d: 'Le quita los permisos' },
+  { c: 'addusertowhitelist "usuario"', d: 'Lo añade a la lista blanca' },
+  { c: 'teleport "origen" "destino"', d: 'Lleva un jugador junto a otro' },
+  { c: 'additem "usuario" "Base.Axe"', d: 'Le da un objeto' },
+  { c: 'godmod "usuario"', d: 'Invulnerabilidad on/off' },
+  { c: 'invisible "usuario"', d: 'Los zombis dejan de verlo' },
+  { c: 'noclip "usuario"', d: 'Atravesar paredes' },
+  { c: 'alarm', d: 'Dispara la alarma del edificio donde estés' },
+  { c: 'chopper', d: 'Lanza el evento del helicóptero' },
+  { c: 'gunshot', d: 'Suena un disparo y atrae zombis' },
+  { c: 'startrain', d: 'Empieza a llover' },
+  { c: 'stoprain', d: 'Deja de llover' },
+  { c: 'startstorm', d: 'Desata una tormenta' },
+  { c: 'checkModsNeedUpdate', d: 'Comprueba si hay mods desactualizados' },
+  { c: 'reloadoptions', d: 'Recarga parte del .ini sin reiniciar' },
+  { c: 'showoptions', d: 'Muestra todas las opciones actuales' },
+  { c: 'quit', d: 'Guarda y apaga el servidor' },
+];
+
+function settingRow(it, raw) {
+  const id = `set-${it.key}`;
+  const attrs = `id="${id}" data-key="${esc(it.key)}" data-type="${it.type}"`;
+  let control;
+
+  if (it.type === 'bool') {
+    const on = String(raw).trim().toLowerCase() === 'true';
+    control = `<label class="switch"><input type="checkbox" ${attrs} ${on ? 'checked' : ''}><i></i></label>`;
+  } else if (it.type === 'select') {
+    control = `<select class="set-input" ${attrs}>${it.options.map((o) => `
+      <option value="${esc(o.v)}" ${String(raw) === String(o.v) ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
+    </select>`;
+  } else if (it.type === 'number') {
+    control = `<input class="set-input set-num" type="number" ${attrs} value="${esc(raw)}"
+      ${it.step ? `step="${it.step}"` : ''} ${it.min != null ? `min="${it.min}"` : ''} ${it.max != null ? `max="${it.max}"` : ''}>`;
+  } else {
+    control = `<input class="set-input" type="text" ${attrs} value="${esc(raw)}"
+      placeholder="${esc(it.placeholder || '')}">`;
+  }
+
+  return `<div class="set-row">
+    <div class="set-main">
+      <label class="set-label" for="${id}">${esc(it.label)}</label>
+      ${it.hint ? `<div class="set-hint">${esc(it.hint)}</div>` : ''}
+      <code class="set-key">${esc(it.key)}</code>
+    </div>
+    <div class="set-ctl">${control}</div>
+  </div>`;
+}
+
+function renderSettings(values) {
+  const html = SETTINGS.map((g) => {
+    const rows = g.items.filter((it) => it.key in values)
+      .map((it) => settingRow(it, values[it.key])).join('');
+    if (!rows) return '';
+    return `<div class="card">
+      <div class="card-head"><h3>${esc(g.group)}</h3></div>
+      <div class="set-list">${rows}</div>
+    </div>`;
+  }).join('');
+
+  $('#settings-groups').innerHTML = html
+    || '<p class="empty">No se pudo leer el .ini. ¿Has arrancado el servidor al menos una vez?</p>';
+}
+
+async function loadSettings() {
+  try {
+    renderSettings((await api('/api/settings')).values);
+  } catch (e) {
+    $('#settings-groups').innerHTML = `<p class="empty">${esc(e.message)}</p>`;
+  }
+}
+
+$('#settings-reload').addEventListener('click', loadSettings);
+
+$('#settings-save').addEventListener('click', async () => {
+  const changes = {};
+  $$('#settings-groups [data-key]').forEach((el) => {
+    changes[el.dataset.key] = el.dataset.type === 'bool' ? String(el.checked) : el.value.trim();
+  });
+  if (!Object.keys(changes).length) return toast('No hay nada que guardar', 'warn');
+
+  try {
+    const r = await jpost('/api/settings', { changes });
+    renderSettings(r.values);
+    toast(`${r.applied.length} ajustes guardados. Reinicia para aplicarlos.`, 'ok');
+    if (r.skipped.length) toast(`Sin efecto (no existen en tu .ini): ${r.skipped.join(', ')}`, 'warn');
+  } catch (e) { toast(e.message, 'err'); }
+});
+
+$('#cmd-reference').innerHTML = COMMANDS.map((k) => `
+  <button class="cmd" data-run="${esc(k.c)}"><b>${esc(k.c)}</b><span>${esc(k.d)}</span></button>`).join('');
+
+$('#cmd-reference').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-run]');
+  if (!b) return;
+  goto('console');
+  const input = $('#console-cmd');
+  input.value = b.dataset.run;
+  input.focus();
+  // dejamos el cursor listo para rellenar el primer argumento entrecomillado
+  const q = input.value.indexOf('"');
+  if (q !== -1) input.setSelectionRange(q + 1, input.value.indexOf('"', q + 1));
 });
 
 /* ======================================================= configuracion == */
