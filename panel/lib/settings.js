@@ -35,11 +35,34 @@ const KEY_RE = /^[A-Za-z][A-Za-z0-9_]*$/;
  * navegador puede pedir cualquier cosa, pero aqui solo pasan estas.
  */
 const CREATABLE = new Set([
-  'PublicName', 'PublicDescription', 'Password', 'MaxPlayers', 'Public', 'Open', 'PVP',
-  'MapRemotePlayerVisibility', 'DisplayUserName', 'ShowFirstAndLastName', 'Faction',
-  'AllowCoop', 'SafetySystem', 'AnnounceDeath', 'GlobalChat',
-  'MinutesPerPage', 'HoursForLootRespawn', 'SpeedLimit', 'SleepAllowed', 'SleepNeeded',
-  'NoFire', 'PauseEmpty',
+  // servidor y acceso
+  'PublicName', 'PublicDescription', 'Password', 'MaxPlayers', 'Public', 'Open',
+  'PingLimit', 'MaxAccountsPerUser', 'DisableScoreboard', 'ServerWelcomeMessage',
+  'DenyLoginOnOverloadedServer', 'LoginQueueEnabled', 'AllowNonAsciiUsername',
+  'HideAdminsInPlayerList', 'DropOffWhiteListAfterDeath',
+  // jugadores y comunicacion
+  'MapRemotePlayerVisibility', 'DisplayUserName', 'ShowFirstAndLastName',
+  'MouseOverToSeeDisplayName', 'HidePlayersBehindYou', 'ShowCoordinates',
+  'Faction', 'FactionDaySurvivedToCreate', 'AllowCoop',
+  'AnnounceDeath', 'AnnounceAnimalDeath', 'GlobalChat', 'ChatMessageCharacterLimit',
+  'VoiceEnable', 'Voice3D', 'VoiceMaxDistance',
+  // pvp y combate
+  'PVP', 'SafetySystem', 'ShowSafety', 'SafetyToggleTimer', 'SafetyCooldownTimer',
+  'PVPMeleeDamageModifier', 'PVPFirearmDamageModifier', 'PVPMeleeWhileHitReaction',
+  'PlayerBumpPlayer', 'KnockedDownAllowed',
+  'AllowDestructionBySledgehammer', 'SledgehammerOnlyInSafehouse',
+  // mundo y partida
+  'Map', 'SpawnItems', 'SpeedLimit', 'FastForwardMultiplier',
+  'SleepAllowed', 'SleepNeeded', 'NoFire', 'PauseEmpty',
+  'CarEngineAttractionModifier', 'BloodSplatLifespanDays',
+  'ItemNumbersLimitPerContainer', 'TrashDeleteAll',
+  'RemovePlayerCorpsesOnCorpseRemoval',
+  // refugios
+  'PlayerSafehouse', 'AdminSafehouse', 'SafehouseAllowLoot', 'SafehouseAllowRespawn',
+  'SafehouseAllowFire', 'SafehouseAllowTrepass', 'SafehouseAllowNonResidential',
+  'SafehouseDaySurvivedToClaim', 'SafeHouseRemovalTime',
+  'SafehousePreventsLootRespawn', 'DisableSafehouseWhenOwnerConnected', 'MaxSafezoneSize',
+  // guardado
   'SaveWorldEveryMinutes', 'BackupsCount', 'BackupsOnStart', 'BackupsOnVersionChange',
   'BackupsPeriod',
 ]);

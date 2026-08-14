@@ -260,17 +260,25 @@
       <!-- ---------------------------------------------------- AJUSTES -->
       <section class="view" data-view="settings">
         <div class="set-bar">
-          <div>
-            <h3>Ajustes rápidos</h3>
-            <p class="hint" id="settings-hint">Los cambios se aplican al reiniciar el servidor.</p>
+          <div class="set-bar-top">
+            <label class="set-search">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+                   stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+              <input id="settings-search" type="search" spellcheck="false"
+                     placeholder="Buscar entre los ajustes…">
+            </label>
+            <div class="set-bar-right">
+              <label class="check"><input type="checkbox" id="settings-onlydirty"><span>Solo modificados</span></label>
+              <span class="set-count" id="settings-count">sin cambios</span>
+              <button class="btn btn-ghost btn-sm" id="settings-reload" disabled>Descartar</button>
+              <button class="btn btn-primary btn-sm" id="settings-save" disabled>Guardar</button>
+            </div>
           </div>
-          <div class="row-gap">
-            <button class="btn btn-ghost btn-sm" id="settings-reload">Descartar</button>
-            <button class="btn btn-primary btn-sm" id="settings-save">Guardar</button>
-          </div>
+          <div class="set-cats" id="settings-cats"></div>
         </div>
 
         <div class="set-groups" id="settings-groups"></div>
+        <p class="empty hidden" id="settings-empty">Ningún ajuste coincide con la búsqueda.</p>
 
         <div class="card">
           <div class="card-head">

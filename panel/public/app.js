@@ -236,7 +236,7 @@ function paintState(st) {
   $('#ov-uptime').textContent = st.proc ? `activo ${fmtDur(st.proc.uptimeSec)}` : 'sin arrancar';
   $('#ov-pid').textContent = st.pid || '—';
   $('#ov-world').textContent = st.serverName;
-  $('#ov-branch').textContent = st.branch === 'unstable' ? 'unstable (B42)' : 'stable (B41)';
+  $('#ov-branch').textContent = st.branch === 'unstable' ? 'unstable' : 'stable';
   $('#brand-server').textContent = st.serverName;
 
   const h = st.host || {};
@@ -710,18 +710,28 @@ const SETTINGS = [
   {
     group: 'Servidor',
     items: [
-      { key: 'PublicName', type: 'text', label: 'Nombre público', def: 'My PZ Server',
+      { key: 'PublicName', type: 'text', label: 'Nombre del servidor', def: 'My PZ Server',
         hint: 'Cómo aparece en la lista de servidores' },
       { key: 'PublicDescription', type: 'text', label: 'Descripción', def: '' },
-      { key: 'Password', type: 'text', label: 'Contraseña del servidor', def: '',
-        hint: 'Vacío = entra cualquiera', placeholder: 'sin contraseña' },
-      { key: 'MaxPlayers', type: 'number', label: 'Jugadores máximos', def: '32', min: 1, max: 100,
-        hint: 'Con 8 GB de RAM, 16 va sobrado' },
+      { key: 'Password', type: 'text', label: 'Contraseña de acceso', def: '',
+        placeholder: 'sin contraseña', hint: 'Vacío = puede entrar cualquiera' },
+      { key: 'MaxPlayers', type: 'range', label: 'Jugadores máximos', def: '32',
+        min: 1, max: 64, step: 1, hint: 'Con 8 GB de RAM, 16 va sobrado' },
       { key: 'Public', type: 'bool', label: 'Listar públicamente', def: 'false',
         hint: 'Aparece en Unirse a servidor → Internet' },
       { key: 'Open', type: 'bool', label: 'Entrada libre', def: 'true',
         hint: 'Si lo apagas, solo entra quien esté en la lista blanca' },
-      { key: 'PVP', type: 'bool', label: 'PvP entre jugadores', def: 'true' },
+      { key: 'PingLimit', type: 'range', label: 'Ping máximo permitido', def: '0',
+        min: 0, max: 1000, step: 50, unit: 'ms', hint: '0 = sin límite' },
+      { key: 'MaxAccountsPerUser', type: 'range', label: 'Cuentas por usuario', def: '0',
+        min: 0, max: 10, step: 1, hint: '0 = sin límite' },
+      { key: 'DenyLoginOnOverloadedServer', type: 'bool', label: 'Rechazar si va saturado', def: 'true' },
+      { key: 'LoginQueueEnabled', type: 'bool', label: 'Cola de entrada', def: 'false' },
+      { key: 'DisableScoreboard', type: 'bool', label: 'Ocultar marcador', def: 'false',
+        hint: 'La lista de conectados que se ve con Tab' },
+      { key: 'HideAdminsInPlayerList', type: 'bool', label: 'Ocultar admins de la lista', def: 'false' },
+      { key: 'ServerWelcomeMessage', type: 'textarea', label: 'Mensaje de bienvenida', def: '',
+        hint: 'Usa <LINE> para saltos de línea' },
     ],
   },
   {
@@ -735,43 +745,111 @@ const SETTINGS = [
           { v: '3', label: 'Todos' },
         ] },
       { key: 'DisplayUserName', type: 'bool', label: 'Nombre sobre el personaje', def: 'true' },
+      { key: 'MouseOverToSeeDisplayName', type: 'bool', label: 'Solo al pasar el ratón', def: 'true',
+        hint: 'El nombre aparece únicamente al apuntar' },
       { key: 'ShowFirstAndLastName', type: 'bool', label: 'Nombre y apellido', def: 'false' },
-      { key: 'Faction', type: 'bool', label: 'Permitir facciones', def: 'true' },
+      { key: 'HidePlayersBehindYou', type: 'bool', label: 'Ocultar a los de tu espalda', def: 'true' },
+      { key: 'ShowCoordinates', type: 'bool', label: 'Mostrar coordenadas', def: 'false' },
       { key: 'AllowCoop', type: 'bool', label: 'Pantalla dividida', def: 'true' },
-      { key: 'SafetySystem', type: 'bool', label: 'Sistema de seguridad PvP', def: 'true',
-        hint: 'Evita golpear a otros sin activarlo antes' },
-      { key: 'AnnounceDeath', type: 'bool', label: 'Anunciar muertes en el chat', def: 'false' },
+      { key: 'Faction', type: 'bool', label: 'Permitir facciones', def: 'true' },
+      { key: 'FactionDaySurvivedToCreate', type: 'range', label: 'Días para crear facción', def: '0',
+        min: 0, max: 30, step: 1, unit: 'd', hint: '0 = desde el primer momento' },
+      { key: 'AnnounceDeath', type: 'bool', label: 'Anunciar muertes', def: 'false' },
+      { key: 'AnnounceAnimalDeath', type: 'bool', label: 'Anunciar muerte de animales', def: 'false' },
       { key: 'GlobalChat', type: 'bool', label: 'Chat global', def: 'true' },
+      { key: 'ChatMessageCharacterLimit', type: 'range', label: 'Límite de caracteres en el chat',
+        def: '200', min: 50, max: 1000, step: 50 },
+      { key: 'VoiceEnable', type: 'bool', label: 'Chat de voz', def: 'true' },
+      { key: 'Voice3D', type: 'bool', label: 'Voz posicional', def: 'true',
+        hint: 'Se oye según la distancia y dirección' },
+      { key: 'VoiceMaxDistance', type: 'range', label: 'Alcance de la voz', def: '100.0',
+        min: 10, max: 300, step: 10, unit: 'm' },
     ],
   },
   {
-    group: 'Partida',
+    group: 'PvP',
     items: [
-      { key: 'MinutesPerPage', type: 'number', label: 'Minutos por página de libro',
-        def: '1.0', step: 0.1, min: 0, max: 60,
-        hint: '1 es lo normal · 0.5 el doble de rápido · 0.1 casi instantáneo' },
-      { key: 'HoursForLootRespawn', type: 'number', label: 'Horas para que reaparezca el loot',
-        def: '0', min: 0, hint: '0 = nunca reaparece' },
-      { key: 'SpeedLimit', type: 'number', label: 'Velocidad máxima de vehículos',
-        def: '70.0', min: 10, max: 150, hint: 'En km/h' },
+      { key: 'PVP', type: 'bool', label: 'PvP activado', def: 'true',
+        hint: 'Si lo apagas, nadie puede dañar a otro jugador' },
+      { key: 'SafetySystem', type: 'bool', label: 'Sistema de seguridad', def: 'true',
+        hint: 'Hay que activar el modo PvP antes de poder golpear' },
+      { key: 'ShowSafety', type: 'bool', label: 'Mostrar icono de seguridad', def: 'true' },
+      { key: 'SafetyToggleTimer', type: 'range', label: 'Tiempo para activar PvP', def: '2',
+        min: 0, max: 10, step: 1, unit: 's' },
+      { key: 'SafetyCooldownTimer', type: 'range', label: 'Enfriamiento del PvP', def: '3',
+        min: 0, max: 30, step: 1, unit: 's' },
+      { key: 'PVPMeleeDamageModifier', type: 'range', label: 'Daño cuerpo a cuerpo', def: '30.0',
+        min: 0, max: 200, step: 5, unit: '%', hint: '100 = daño completo' },
+      { key: 'PVPFirearmDamageModifier', type: 'range', label: 'Daño de armas de fuego', def: '50.0',
+        min: 0, max: 200, step: 5, unit: '%' },
+      { key: 'PVPMeleeWhileHitReaction', type: 'bool', label: 'Golpear mientras te aturden', def: 'false' },
+      { key: 'PlayerBumpPlayer', type: 'bool', label: 'Empujarse entre jugadores', def: 'false' },
+      { key: 'KnockedDownAllowed', type: 'bool', label: 'Permitir derribos', def: 'false' },
+      { key: 'AllowDestructionBySledgehammer', type: 'bool', label: 'Demoler con mazo', def: 'true' },
+      { key: 'SledgehammerOnlyInSafehouse', type: 'bool', label: 'Mazo solo en refugio propio', def: 'false' },
+    ],
+  },
+  {
+    group: 'Mundo',
+    items: [
+      { key: 'Map', type: 'text', label: 'Mapas cargados', def: 'Muldraugh, KY',
+        hint: 'Separados por ; · los mods de mapa se añaden aquí' },
+      { key: 'SpawnItems', type: 'text', label: 'Objetos iniciales', def: '',
+        placeholder: 'Base.Axe;Base.Bag_BigHikingBag',
+        hint: 'Lo que aparece en el inventario al empezar' },
+      { key: 'SpeedLimit', type: 'range', label: 'Velocidad máxima de vehículos', def: '70.0',
+        min: 10, max: 150, step: 5, unit: 'km/h' },
+      { key: 'CarEngineAttractionModifier', type: 'range', label: 'Ruido del motor', def: '0.5',
+        min: 0, max: 5, step: 0.1, hint: 'Cuánto atraen los coches a los zombis' },
+      { key: 'FastForwardMultiplier', type: 'range', label: 'Velocidad de avance rápido', def: '40.0',
+        min: 1, max: 100, step: 1, unit: '×' },
       { key: 'SleepAllowed', type: 'bool', label: 'Permitir dormir', def: 'false' },
       { key: 'SleepNeeded', type: 'bool', label: 'El cansancio afecta', def: 'false' },
+      { key: 'PauseEmpty', type: 'bool', label: 'Pausar con el servidor vacío', def: 'true',
+        hint: 'El tiempo no corre si no hay nadie conectado' },
       { key: 'NoFire', type: 'bool', label: 'Desactivar el fuego', def: 'false',
         hint: 'Impide incendios que arrasen el mapa' },
-      { key: 'PauseEmpty', type: 'bool', label: 'Pausar si no hay nadie', def: 'true',
-        hint: 'El tiempo no corre con el servidor vacío' },
+      { key: 'BloodSplatLifespanDays', type: 'range', label: 'Días que dura la sangre', def: '0',
+        min: 0, max: 60, step: 1, unit: 'd', hint: '0 = no se limpia nunca' },
+      { key: 'ItemNumbersLimitPerContainer', type: 'range', label: 'Objetos por contenedor', def: '0',
+        min: 0, max: 200, step: 10, hint: '0 = sin límite' },
+      { key: 'RemovePlayerCorpsesOnCorpseRemoval', type: 'bool',
+        label: 'Borrar también cadáveres de jugador', def: 'false' },
+      { key: 'TrashDeleteAll', type: 'bool', label: 'La papelera borra del todo', def: 'false' },
     ],
   },
   {
-    group: 'Guardado y copias',
+    group: 'Refugios',
     items: [
-      { key: 'SaveWorldEveryMinutes', type: 'number', label: 'Guardar cada X minutos',
-        def: '0', min: 0 },
-      { key: 'BackupsCount', type: 'number', label: 'Copias a conservar',
-        def: '5', min: 0, max: 50 },
+      { key: 'PlayerSafehouse', type: 'bool', label: 'Los jugadores pueden reclamar refugio', def: 'false' },
+      { key: 'AdminSafehouse', type: 'bool', label: 'Solo los admins pueden reclamar', def: 'false' },
+      { key: 'SafehouseDaySurvivedToClaim', type: 'range', label: 'Días para poder reclamar', def: '0',
+        min: 0, max: 30, step: 1, unit: 'd' },
+      { key: 'SafeHouseRemovalTime', type: 'range', label: 'Caduca sin visitar', def: '144',
+        min: 0, max: 720, step: 24, unit: 'h', hint: '0 = no caduca nunca' },
+      { key: 'SafehouseAllowLoot', type: 'bool', label: 'Los miembros pueden saquear', def: 'true' },
+      { key: 'SafehouseAllowRespawn', type: 'bool', label: 'Reaparecer en el refugio', def: 'false' },
+      { key: 'SafehouseAllowTrepass', type: 'bool', label: 'Permitir que entren extraños', def: 'true' },
+      { key: 'SafehouseAllowFire', type: 'bool', label: 'Permitir fuego dentro', def: 'true' },
+      { key: 'SafehouseAllowNonResidential', type: 'bool', label: 'Reclamar edificios no residenciales', def: 'false' },
+      { key: 'SafehousePreventsLootRespawn', type: 'bool', label: 'Sin reaparición de loot dentro', def: 'true' },
+      { key: 'DisableSafehouseWhenOwnerConnected', type: 'bool',
+        label: 'Desactivar si el dueño está conectado', def: 'false' },
+      { key: 'MaxSafezoneSize', type: 'range', label: 'Tamaño máximo de zona segura', def: '20000',
+        min: 100, max: 50000, step: 1000 },
+    ],
+  },
+  {
+    group: 'Guardado',
+    items: [
+      { key: 'SaveWorldEveryMinutes', type: 'range', label: 'Guardar el mundo cada', def: '0',
+        min: 0, max: 120, step: 5, unit: 'min', hint: '0 = solo al apagar' },
+      { key: 'BackupsCount', type: 'range', label: 'Copias a conservar', def: '5',
+        min: 0, max: 50, step: 1 },
+      { key: 'BackupsPeriod', type: 'range', label: 'Copia automática cada', def: '0',
+        min: 0, max: 1440, step: 30, unit: 'min', hint: '0 = desactivado' },
       { key: 'BackupsOnStart', type: 'bool', label: 'Copia al arrancar', def: 'true' },
       { key: 'BackupsOnVersionChange', type: 'bool', label: 'Copia al cambiar de versión', def: 'true' },
-      { key: 'BackupsPeriod', type: 'number', label: 'Copia periódica (minutos)', def: '0', min: 0 },
     ],
   },
 ];
@@ -803,52 +881,167 @@ const COMMANDS = [
   { c: 'quit', d: 'Guarda y apaga el servidor' },
 ];
 
+/** Valor actual de un control, siempre como texto (lo que va al .ini). */
+function ctlValue(el) {
+  return el.dataset.type === 'bool' ? String(el.checked) : el.value.trim();
+}
+
 function settingRow(it, raw, missing) {
   const id = `set-${it.key}`;
+  const val = String(raw);
   const attrs = `id="${id}" data-key="${esc(it.key)}" data-type="${it.type}"`
-    + ` data-def="${esc(it.def)}"${missing ? ' data-missing="1"' : ''}`;
+    + ` data-orig="${esc(val)}"${missing ? ' data-missing="1"' : ''}`;
   let control;
 
   if (it.type === 'bool') {
-    const on = String(raw).trim().toLowerCase() === 'true';
+    const on = val.trim().toLowerCase() === 'true';
     control = `<label class="switch"><input type="checkbox" ${attrs} ${on ? 'checked' : ''}><i></i></label>`;
+
   } else if (it.type === 'select') {
     control = `<select class="set-input" ${attrs}>${it.options.map((o) => `
-      <option value="${esc(o.v)}" ${String(raw) === String(o.v) ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
+      <option value="${esc(o.v)}"${val === String(o.v) ? ' selected' : ''}>${esc(o.label)}</option>`).join('')}
     </select>`;
-  } else if (it.type === 'number') {
-    control = `<input class="set-input set-num" type="number" ${attrs} value="${esc(raw)}"
-      ${it.step ? `step="${it.step}"` : ''} ${it.min != null ? `min="${it.min}"` : ''} ${it.max != null ? `max="${it.max}"` : ''}>`;
+
+  } else if (it.type === 'range') {
+    // el number lleva el data-key (es la fuente de verdad); el slider solo lo empuja
+    control = `<div class="set-range">
+      <input type="range" data-slider="${esc(it.key)}" value="${esc(val)}"
+             min="${it.min}" max="${it.max}" step="${it.step || 1}">
+      <input class="set-input set-num" type="number" ${attrs} value="${esc(val)}"
+             min="${it.min}" max="${it.max}" step="${it.step || 1}">
+      ${it.unit ? `<span class="set-unit">${esc(it.unit)}</span>` : '<span class="set-unit"></span>'}
+    </div>`;
+
+  } else if (it.type === 'textarea') {
+    control = `<textarea class="set-input" ${attrs} placeholder="${esc(it.placeholder || '')}">${esc(val)}</textarea>`;
+
   } else {
-    control = `<input class="set-input" type="text" ${attrs} value="${esc(raw)}"
+    control = `<input class="set-input" type="text" ${attrs} value="${esc(val)}"
       placeholder="${esc(it.placeholder || '')}">`;
   }
 
-  return `<div class="set-row${missing ? ' is-missing' : ''}">
+  const search = `${it.label} ${it.key} ${it.hint || ''}`.toLowerCase();
+
+  return `<div class="set-row${missing ? ' is-missing' : ''}" data-search="${esc(search)}">
     <div class="set-main">
       <label class="set-label" for="${id}">${esc(it.label)}${
         missing ? '<span class="set-new" title="No está en tu .ini; se añadirá si lo cambias">nuevo</span>' : ''}</label>
       ${it.hint ? `<div class="set-hint">${esc(it.hint)}</div>` : ''}
       <code class="set-key">${esc(it.key)}</code>
     </div>
-    <div class="set-ctl">${control}</div>
+    <div class="set-ctl">
+      <button class="set-reset" data-reset="${esc(it.key)}" title="Volver al valor guardado">&#8635;</button>
+      ${control}
+    </div>
   </div>`;
 }
 
 function renderSettings(values) {
-  const html = SETTINGS.map((g) => {
+  $('#settings-groups').innerHTML = SETTINGS.map((g) => {
     const rows = g.items.map((it) => {
       const missing = !(it.key in values);
       return settingRow(it, missing ? it.def : values[it.key], missing);
     }).join('');
-    return `<div class="card">
+    return `<div class="card" data-cat="${esc(g.group)}">
       <div class="card-head"><h3>${esc(g.group)}</h3></div>
       <div class="set-list">${rows}</div>
     </div>`;
   }).join('');
 
-  $('#settings-groups').innerHTML = html;
+  refreshDirty();
+  applySettingsFilter();
 }
+
+/* ------------------------------------------------------- cambios sueltos */
+
+function refreshDirty() {
+  let n = 0;
+  $$('#settings-groups [data-key]').forEach((el) => {
+    const dirty = ctlValue(el) !== el.dataset.orig;
+    el.closest('.set-row').classList.toggle('is-dirty', dirty);
+    if (dirty) n += 1;
+  });
+
+  const label = $('#settings-count');
+  label.textContent = n ? `${n} sin guardar` : 'sin cambios';
+  label.classList.toggle('on', n > 0);
+  $('#settings-save').disabled = n === 0;
+  $('#settings-reload').disabled = n === 0;
+  if ($('#settings-onlydirty').checked) applySettingsFilter();
+}
+
+$('#settings-groups').addEventListener('input', (e) => {
+  // el slider empuja al number, y el number al slider
+  const slider = e.target.closest('[data-slider]');
+  if (slider) {
+    const num = $(`[data-key="${CSS.escape(slider.dataset.slider)}"]`);
+    if (num) num.value = slider.value;
+  } else if (e.target.dataset.key) {
+    const s = $(`[data-slider="${CSS.escape(e.target.dataset.key)}"]`);
+    if (s) s.value = e.target.value;
+  }
+  refreshDirty();
+});
+$('#settings-groups').addEventListener('change', refreshDirty);
+
+$('#settings-groups').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-reset]');
+  if (!b) return;
+  const el = $(`[data-key="${CSS.escape(b.dataset.reset)}"]`);
+  if (!el) return;
+  if (el.dataset.type === 'bool') el.checked = el.dataset.orig.toLowerCase() === 'true';
+  else el.value = el.dataset.orig;
+  const s = $(`[data-slider="${CSS.escape(b.dataset.reset)}"]`);
+  if (s) s.value = el.dataset.orig;
+  refreshDirty();
+});
+
+/* ------------------------------------------------------------- filtros */
+
+let settingsCat = 'Todos';
+
+function applySettingsFilter() {
+  const q = $('#settings-search').value.trim().toLowerCase();
+  const onlyDirty = $('#settings-onlydirty').checked;
+  let total = 0;
+
+  $$('#settings-groups .card').forEach((card) => {
+    const inCat = settingsCat === 'Todos' || card.dataset.cat === settingsCat;
+    let shown = 0;
+    $$('.set-row', card).forEach((row) => {
+      const show = inCat
+        && (!q || row.dataset.search.includes(q))
+        && (!onlyDirty || row.classList.contains('is-dirty'));
+      row.classList.toggle('hidden', !show);
+      if (show) shown += 1;
+    });
+    card.classList.toggle('hidden', shown === 0);
+    total += shown;
+  });
+
+  $('#settings-empty').classList.toggle('hidden', total > 0);
+}
+
+$('#settings-cats').innerHTML = ['Todos', ...SETTINGS.map((g) => g.group)]
+  .map((c, i) => {
+    const n = c === 'Todos'
+      ? SETTINGS.reduce((a, g) => a + g.items.length, 0)
+      : SETTINGS.find((g) => g.group === c).items.length;
+    return `<button class="set-cat${i === 0 ? ' is-active' : ''}" data-cat="${esc(c)}">${esc(c)}<i>${n}</i></button>`;
+  }).join('');
+
+$('#settings-cats').addEventListener('click', (e) => {
+  const b = e.target.closest('.set-cat');
+  if (!b) return;
+  settingsCat = b.dataset.cat;
+  $$('.set-cat').forEach((x) => x.classList.toggle('is-active', x === b));
+  applySettingsFilter();
+});
+
+$('#settings-search').addEventListener('input', applySettingsFilter);
+$('#settings-onlydirty').addEventListener('change', applySettingsFilter);
+
+/* -------------------------------------------------------- carga y guardado */
 
 async function loadSettings() {
   try {
@@ -861,24 +1054,29 @@ async function loadSettings() {
 $('#settings-reload').addEventListener('click', loadSettings);
 
 $('#settings-save').addEventListener('click', async () => {
+  // solo se envia lo que ha cambiado: una fila intacta nunca se escribe,
+  // asi que las "nuevas" no ensucian el .ini repitiendo su valor por defecto
   const changes = {};
   $$('#settings-groups [data-key]').forEach((el) => {
-    const value = el.dataset.type === 'bool' ? String(el.checked) : el.value.trim();
-    // una fila "nueva" sin tocar no se escribe: no ensuciamos el .ini con
-    // lineas que solo repiten el valor por defecto del servidor
-    if (el.dataset.missing === '1' && value === el.dataset.def) return;
-    changes[el.dataset.key] = value;
+    const value = ctlValue(el);
+    if (value !== el.dataset.orig) changes[el.dataset.key] = value;
   });
   if (!Object.keys(changes).length) return toast('No hay nada que guardar', 'warn');
 
+  const btn = $('#settings-save');
+  btn.disabled = true; btn.textContent = 'Guardando…';
   try {
     const r = await jpost('/api/settings', { changes });
     renderSettings(r.values);
     const n = r.applied.length + r.created.length;
-    toast(`${n} ajustes guardados. Reinicia para aplicarlos.`, 'ok');
-    if (r.created.length) toast(`Añadidos al .ini: ${r.created.join(', ')}`, 'ok');
+    toast(`${n} ajuste(s) guardados. Reinicia para aplicarlos.`, 'ok');
     if (r.skipped.length) toast(`Sin efecto: ${r.skipped.join(', ')}`, 'warn');
-  } catch (e) { toast(e.message, 'err'); }
+  } catch (e) {
+    toast(e.message, 'err');
+  } finally {
+    btn.textContent = 'Guardar';
+    refreshDirty();
+  }
 });
 
 $('#cmd-reference').innerHTML = COMMANDS.map((k) => `
