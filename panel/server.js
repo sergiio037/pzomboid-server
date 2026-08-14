@@ -278,10 +278,14 @@ app.post('/api/config/:kind', requireAuth, wrap(async (req, res) => {
 
 /* --------------------------------------------------------------- static */
 
+// Sin cache de navegador: el panel se actualiza con `git pull` y un CSS o un JS
+// viejos producen fallos invisibles (botones muertos, estilos a medias).
+// 'no-cache' no significa "no guardar", sino "revalida siempre": con etag las
+// recargas devuelven 304 y no cuestan practicamente nada.
 app.use(express.static(path.join(__dirname, 'public'), {
   index: 'index.html',
-  maxAge: '1h',
   etag: true,
+  setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
 }));
 
 app.use((req, res) => res.status(404).json({ error: 'no encontrado' }));
