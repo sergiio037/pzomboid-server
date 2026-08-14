@@ -1,0 +1,9 @@
+# Los scripts se editan en Windows pero se ejecutan en Linux: si git los
+# entrega con CRLF, bash falla con "bad interpreter: /usr/bin/env bash^M".
+# Forzamos LF en el checkout pase lo que pase.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.zip binary
+*.tar.gz binary

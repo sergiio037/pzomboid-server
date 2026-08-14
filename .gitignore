@@ -1,0 +1,12 @@
+node_modules/
+package-lock.json
+
+# generado en la VM, contiene el hash de la contrasena y el secreto de sesion
+.env
+
+# datos de ejecucion, nunca deben acabar en el repo
+logs/
+backups/
+tmp/
+run/
+*.log

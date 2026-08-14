@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Project Zomboid · Panel</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>&#129503;</text></svg>">
+</head>
+<body>
+
+<!-- ===================================================================== -->
+<!-- LOGIN                                                                 -->
+<!-- ===================================================================== -->
+<div id="login" class="login-screen hidden">
+  <div class="login-bg"></div>
+  <form class="login-card" id="login-form" autocomplete="on">
+    <div class="login-mark">
+      <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.6">
+        <circle cx="12" cy="12" r="3.2"/>
+        <path d="M12 8.8V3.4M9.4 13.6l-4.7 2.7M14.6 13.6l4.7 2.7"/>
+        <circle cx="12" cy="12" r="9.2" stroke-dasharray="3 3" opacity=".45"/>
+      </svg>
+    </div>
+    <h1>Project&nbsp;Zomboid</h1>
+    <p class="login-sub">Panel de administración del servidor</p>
+
+    <label class="field">
+      <span>Usuario</span>
+      <input id="login-user" name="username" type="text" autocomplete="username" spellcheck="false" required>
+    </label>
+
+    <label class="field">
+      <span>Contraseña</span>
+      <input id="login-pass" name="password" type="password" autocomplete="current-password" required>
+    </label>
+
+    <p class="login-error" id="login-error" hidden></p>
+    <button class="btn btn-primary btn-block" type="submit" id="login-btn">Entrar</button>
+  </form>
+</div>
+
+<!-- ===================================================================== -->
+<!-- APP                                                                   -->
+<!-- ===================================================================== -->
+<div id="app" class="app hidden">
+
+  <aside class="sidebar">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7">
+        <circle cx="12" cy="12" r="3.2"/>
+        <path d="M12 8.8V3.4M9.4 13.6l-4.7 2.7M14.6 13.6l4.7 2.7"/>
+      </svg>
+      <div>
+        <strong>PZ Panel</strong>
+        <small id="brand-server">servidor</small>
+      </div>
+    </div>
+
+    <nav class="nav" id="nav">
+      <button class="nav-item is-active" data-view="overview">
+        <svg viewBox="0 0 24 24"><path d="M3 12l9-8 9 8M5 10v10h14V10"/></svg>Resumen
+      </button>
+      <button class="nav-item" data-view="console">
+        <svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M8 10l2.5 2L8 14M13 15h4"/></svg>Consola
+      </button>
+      <button class="nav-item" data-view="mods">
+        <svg viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg>Mods
+      </button>
+      <button class="nav-item" data-view="worlds">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 3 2.6 15 0 18M12 3c-2.6 3-2.6 15 0 18"/></svg>Mundos
+      </button>
+      <button class="nav-item" data-view="config">
+        <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/><circle cx="17" cy="18" r="2.2"/></svg>Configuración
+      </button>
+    </nav>
+
+    <div class="side-foot">
+      <div class="side-stat"><span>CPU host</span><b id="side-cpu">—</b></div>
+      <div class="side-stat"><span>RAM host</span><b id="side-mem">—</b></div>
+      <div class="side-stat"><span>Disco</span><b id="side-disk">—</b></div>
+      <button class="btn btn-ghost btn-block" id="logout-btn">Cerrar sesión</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <h2 id="view-title">Resumen</h2>
+      <div class="topbar-right">
+        <span class="pill" id="state-pill"><i class="dot"></i><span id="state-text">…</span></span>
+        <div class="power">
+          <button class="btn btn-ok"     data-power="start"   title="Encender">Encender</button>
+          <button class="btn btn-warn"   data-power="restart" title="Reiniciar">Reiniciar</button>
+          <button class="btn btn-danger" data-power="stop"    title="Apagar">Apagar</button>
+        </div>
+      </div>
+    </header>
+
+    <div class="views">
+
+      <!-- ---------------------------------------------------- RESUMEN -->
+      <section class="view is-active" data-view="overview">
+        <div class="cards">
+          <div class="card stat">
+            <span class="stat-label">Estado</span>
+            <b class="stat-value" id="ov-state">—</b>
+            <small id="ov-substate">servicio systemd</small>
+          </div>
+          <div class="card stat">
+            <span class="stat-label">Jugadores</span>
+            <b class="stat-value" id="ov-players">—</b>
+            <small id="ov-players-names">nadie conectado</small>
+          </div>
+          <div class="card stat">
+            <span class="stat-label">RAM del servidor</span>
+            <b class="stat-value" id="ov-mem">—</b>
+            <small>proceso java</small>
+          </div>
+          <div class="card stat">
+            <span class="stat-label">CPU del servidor</span>
+            <b class="stat-value" id="ov-cpu">—</b>
+            <small id="ov-uptime">sin arrancar</small>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-head">
+              <h3>Consola en vivo</h3>
+              <button class="btn btn-ghost btn-sm" data-goto="console">Abrir consola</button>
+            </div>
+            <pre class="console console-mini" id="ov-console"></pre>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><h3>Acciones rápidas</h3></div>
+            <div class="quick">
+              <button class="btn btn-ghost" data-cmd="save">Guardar mundo</button>
+              <button class="btn btn-ghost" data-cmd="players">Ver jugadores</button>
+              <button class="btn btn-ghost" data-cmd="checkModsNeedUpdate">Comprobar mods</button>
+              <button class="btn btn-ghost" data-cmd="reloadoptions">Recargar opciones</button>
+              <button class="btn btn-ghost" id="btn-update">Actualizar servidor (SteamCMD)</button>
+            </div>
+            <div class="info-list">
+              <div><span>Mundo activo</span><b id="ov-world">—</b></div>
+              <div><span>Rama</span><b id="ov-branch">—</b></div>
+              <div><span>PID</span><b id="ov-pid">—</b></div>
+              <div><span>Uptime host</span><b id="ov-host-uptime">—</b></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------------------------------------------------- CONSOLA -->
+      <section class="view" data-view="console">
+        <div class="card card-flush console-card">
+          <div class="card-head">
+            <h3>Consola del servidor</h3>
+            <div class="row-gap">
+              <label class="check"><input type="checkbox" id="autoscroll" checked><span>Auto-scroll</span></label>
+              <button class="btn btn-ghost btn-sm" id="console-clear">Limpiar vista</button>
+            </div>
+          </div>
+          <pre class="console" id="console-out"></pre>
+          <form class="console-input" id="console-form">
+            <span class="prompt">&gt;</span>
+            <input id="console-cmd" type="text" spellcheck="false" autocomplete="off"
+                   placeholder="escribe un comando y pulsa Enter  ·  ↑ ↓ para el historial">
+            <button class="btn btn-primary btn-sm" type="submit">Enviar</button>
+          </form>
+          <div class="chips" id="cmd-chips"></div>
+        </div>
+      </section>
+
+      <!-- ------------------------------------------------------- MODS -->
+      <section class="view" data-view="mods">
+        <div class="dropzone" id="dropzone">
+          <input type="file" id="file-input" multiple accept=".zip" hidden>
+          <input type="file" id="dir-input" multiple webkitdirectory directory hidden>
+          <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>
+          </svg>
+          <p><b>Arrastra aquí</b> un .zip o la carpeta del mod</p>
+          <div class="row-gap">
+            <button class="btn btn-ghost btn-sm" id="pick-file">Elegir archivo .zip</button>
+            <button class="btn btn-ghost btn-sm" id="pick-dir">Elegir carpeta</button>
+          </div>
+          <div class="progress" id="upload-progress" hidden><div></div></div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-head">
+              <h3>Mods instalados <span class="count" id="mods-count">0</span></h3>
+              <button class="btn btn-ghost btn-sm" id="mods-refresh">Refrescar</button>
+            </div>
+            <div class="mod-list" id="mod-list"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><h3>Workshop</h3></div>
+            <p class="hint">IDs del Workshop de Steam. El servidor los descarga solo al arrancar; después activa su <em>Mod ID</em> en la lista de la izquierda o abajo.</p>
+            <form class="inline-form" id="ws-form">
+              <input id="ws-id" type="text" inputmode="numeric" placeholder="ID del Workshop (ej. 2392709985)">
+              <button class="btn btn-primary btn-sm" type="submit">Añadir</button>
+            </form>
+            <div class="tag-list" id="ws-list"></div>
+
+            <div class="card-head" style="margin-top:22px"><h3>Mod IDs activos</h3></div>
+            <p class="hint">Contenido de <code>Mods=</code> en el .ini. Puedes añadir a mano el ID de un mod del Workshop.</p>
+            <form class="inline-form" id="modid-form">
+              <input id="modid-input" type="text" placeholder="Mod ID (ej. Brita_2)">
+              <button class="btn btn-primary btn-sm" type="submit">Añadir</button>
+            </form>
+            <div class="tag-list" id="modid-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ----------------------------------------------------- MUNDOS -->
+      <section class="view" data-view="worlds">
+        <div class="card">
+          <div class="card-head">
+            <h3>Partidas guardadas</h3>
+            <button class="btn btn-ghost btn-sm" id="worlds-refresh">Refrescar</button>
+          </div>
+          <p class="hint" id="worlds-hint"></p>
+          <div class="table" id="world-list"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h3>Copias de seguridad</h3></div>
+          <div class="table" id="backup-list"></div>
+        </div>
+      </section>
+
+      <!-- ------------------------------------------------ CONFIGURACION -->
+      <section class="view" data-view="config">
+        <div class="card card-flush">
+          <div class="card-head">
+            <div class="tabs" id="cfg-tabs">
+              <button class="tab is-active" data-cfg="ini">servidor .ini</button>
+              <button class="tab" data-cfg="sandbox">SandboxVars.lua</button>
+            </div>
+            <div class="row-gap">
+              <button class="btn btn-ghost btn-sm" id="cfg-reload">Descartar cambios</button>
+              <button class="btn btn-primary btn-sm" id="cfg-save">Guardar</button>
+            </div>
+          </div>
+          <p class="hint cfg-path" id="cfg-path"></p>
+          <textarea class="editor" id="cfg-text" spellcheck="false"></textarea>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<!-- ===================================================================== -->
+<div class="toasts" id="toasts"></div>
+
+<div class="modal hidden" id="modal">
+  <div class="modal-card">
+    <h3 id="modal-title">¿Seguro?</h3>
+    <p id="modal-text"></p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="modal-cancel">Cancelar</button>
+      <button class="btn btn-danger" id="modal-ok">Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
