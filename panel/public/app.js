@@ -716,6 +716,40 @@ async function loadConfig(kind) {
   }
 }
 
+/**
+ * Buscador del editor. Ctrl+F del navegador no encuentra texto dentro de un
+ * <textarea>, y el .ini tiene mas de cien lineas. Enter repetido salta a la
+ * siguiente coincidencia y al llegar al final vuelve a empezar.
+ */
+let findPos = 0;
+
+function cfgFind(term) {
+  const box = $('#cfg-text');
+  const needle = String(term || '').trim().toLowerCase();
+  if (!needle || box.disabled) return;
+
+  const hay = box.value.toLowerCase();
+  let i = hay.indexOf(needle, findPos);
+  if (i === -1) i = hay.indexOf(needle, 0);
+  if (i === -1) { toast(`No encontrado: ${term}`, 'warn'); return; }
+
+  findPos = i + needle.length;
+  box.focus();
+  box.setSelectionRange(i, i + needle.length);
+
+  // centramos a mano: el scroll automatico hacia la seleccion no es fiable
+  const line = box.value.slice(0, i).split('\n').length - 1;
+  const lineH = parseFloat(getComputedStyle(box).lineHeight) || 18;
+  box.scrollTop = Math.max(0, line * lineH - box.clientHeight / 2);
+}
+
+$('#cfg-find').addEventListener('input', () => { findPos = 0; });
+$('#cfg-find').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  cfgFind(e.target.value);
+});
+
 $('#cfg-tabs').addEventListener('click', (e) => {
   const t = e.target.closest('.tab');
   if (t) loadConfig(t.dataset.cfg);
