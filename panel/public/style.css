@@ -379,13 +379,15 @@ em{ font-style:normal; color:var(--txt); }
 .set-cat.is-active{ background:#1e2618; color:var(--accent); border-color:var(--accent-dk); }
 .set-cat i{ font-style:normal; opacity:.55; margin-left:5px; font-size:11px; }
 
+/* min() evita que una columna sea mas ancha que su contenedor: sin el, la
+   rejilla desborda en cuanto el area util baja del minimo */
 .set-groups{
-  display:grid; grid-template-columns:repeat(auto-fit, minmax(390px,1fr));
+  display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 420px), 1fr));
   gap:14px; margin-bottom:14px; align-items:start;
 }
 .set-list{ display:grid; }
 .set-row{
-  display:flex; align-items:center; justify-content:space-between; gap:18px;
+  display:flex; align-items:center; gap:14px; flex-wrap:wrap;
   padding:12px 12px 12px 14px; margin:0 -6px;
   border-radius:var(--radius-sm);
   border-left:2px solid transparent; transition:background .14s, border-color .14s;
@@ -394,11 +396,14 @@ em{ font-style:normal; color:var(--txt); }
 .set-row:hover{ background:#171c14; }
 .set-row.is-dirty{ border-left-color:var(--amber); background:#1e1a0d; }
 
-.set-main{ min-width:0; flex:1; }
-.set-label{ display:block; font-size:13px; font-weight:600; cursor:pointer; }
-.set-hint{ font-size:11.8px; color:var(--txt-mute); margin-top:3px; line-height:1.45; }
-.set-key{ display:inline-block; margin-top:5px; font-size:10.5px; color:#5c664f; font-family:var(--mono); }
-.set-ctl{ flex:none; display:flex; align-items:center; gap:8px; }
+/* flex:1 1 190px -> si no caben etiqueta y control en la misma linea, el
+   control baja solo a la siguiente en vez de salirse de la tarjeta */
+.set-main{ flex:1 1 190px; min-width:0; }
+.set-label{ display:block; font-size:13px; font-weight:600; cursor:pointer; overflow-wrap:anywhere; }
+.set-hint{ font-size:11.8px; color:var(--txt-mute); margin-top:3px; line-height:1.45; overflow-wrap:anywhere; }
+.set-key{ display:inline-block; margin-top:5px; font-size:10.5px; color:#5c664f;
+          font-family:var(--mono); overflow-wrap:anywhere; }
+.set-ctl{ flex:0 1 auto; min-width:0; margin-left:auto; display:flex; align-items:center; gap:8px; }
 
 .set-new{
   margin-left:7px; padding:1px 6px; border-radius:99px; vertical-align:1px;
@@ -416,25 +421,29 @@ em{ font-style:normal; color:var(--txt); }
 .set-row.is-dirty .set-reset{ display:grid; }
 .set-reset:hover{ background:#3a2f10; }
 
-/* --- controles --- */
+/* --- controles ---
+   Todos llevan min-width explicito: por defecto un item flex no baja de su
+   tamaño intrinseco (min-width:auto) y es lo que hacia que se salieran. */
 .set-input{
   padding:7px 10px; font:inherit; font-size:12.8px; color:var(--txt);
   background:#0d100b; border:1px solid var(--line); border-radius:var(--radius-sm);
-  outline:none; min-width:170px; transition:border-color .15s, box-shadow .15s;
+  outline:none; width:180px; min-width:0; max-width:100%;
+  transition:border-color .15s, box-shadow .15s;
 }
 .set-input:focus{ border-color:var(--accent-dk); box-shadow:0 0 0 3px rgba(159,197,72,.11); }
-.set-num{ min-width:74px; width:74px; text-align:right; font-family:var(--mono); }
-select.set-input{ cursor:pointer; min-width:150px; }
+.set-num{ width:72px; min-width:52px; text-align:right; font-family:var(--mono); }
+select.set-input{ cursor:pointer; width:154px; }
 select.set-input option{ background:var(--panel-2); color:var(--txt); }
-textarea.set-input{ min-width:230px; width:230px; height:74px; resize:vertical;
+textarea.set-input{ width:240px; height:74px; resize:vertical;
                     font-family:var(--mono); font-size:11.8px; line-height:1.5; }
 
-.set-range{ display:flex; align-items:center; gap:10px; }
-.set-unit{ font-size:11.5px; color:var(--txt-mute); min-width:34px; font-family:var(--mono); }
+.set-range{ display:flex; align-items:center; gap:10px; min-width:0; max-width:100%; }
+.set-unit{ font-size:11.5px; color:var(--txt-mute); min-width:30px; flex:none;
+           font-family:var(--mono); }
 
 input[type=range]{
   -webkit-appearance:none; appearance:none;
-  width:120px; height:4px; border-radius:99px; cursor:pointer;
+  width:118px; min-width:54px; height:4px; border-radius:99px; cursor:pointer;
   background:#2a3223; outline:none;
 }
 input[type=range]::-webkit-slider-thumb{
@@ -453,11 +462,14 @@ input[type=range]::-moz-range-thumb{
 input[type=range]::-moz-range-track{ height:4px; border-radius:99px; background:#2a3223; }
 input[type=range]:focus-visible{ box-shadow:0 0 0 3px rgba(159,197,72,.16); }
 
+/* En pantallas estrechas el control ocupa su propia linea completa y el
+   slider se estira, en vez de quedarse encogido en una esquina. */
 @media (max-width:720px){
-  .set-row{ flex-direction:column; align-items:stretch; gap:10px; }
-  .set-ctl{ justify-content:flex-end; }
-  .set-input, textarea.set-input{ min-width:0; width:100%; }
-  .set-num{ width:70px; min-width:70px; }
+  .set-ctl{ width:100%; }
+  .set-range{ flex:1; }
+  input[type=range]{ flex:1; width:auto; }
+  .set-input, select.set-input, textarea.set-input{ flex:1; width:auto; }
+  .set-num{ flex:none; width:72px; }
 }
 
 /* ---------------------------------------------------------- comandos --- */
