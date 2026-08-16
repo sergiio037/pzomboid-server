@@ -475,10 +475,17 @@ const ACCESS_LEVELS = [
   ['banned', 'Baneado'],
 ];
 
+/**
+ * Eventos que funcionan SIN usuario desde la consola del servidor.
+ * `alarm` queda fuera a proposito: necesita la posicion de un admin dentro de
+ * una habitacion, y desde la consola no hay ninguno. `thunder` y `lightning`
+ * exigen usuario, asi que van en el panel del jugador.
+ */
 const WORLD_EVENTS = [
-  ['chopper', 'Helicóptero'], ['gunshot', 'Disparo lejano'], ['alarm', 'Alarma'],
-  ['startrain', 'Empezar lluvia'], ['stoprain', 'Parar lluvia'],
-  ['startstorm', 'Tormenta'], ['thunder', 'Trueno'], ['lightning', 'Rayo'],
+  ['chopper', 'Helicóptero'], ['gunshot', 'Disparo lejano'],
+  ['stoprain', 'Parar lluvia'], ['stopweather', 'Despejar el clima'],
+  ['checkModsNeedUpdate', 'Comprobar mods'], ['reloadoptions', 'Recargar opciones'],
+  ['save', 'Guardar mundo'],
 ];
 
 let players = [];
@@ -540,22 +547,14 @@ function renderPlayerPanel() {
 
   const others = players.filter((p) => p !== selectedPlayer);
 
-  // El parser de comandos de Zomboid no traga nombres con espacio ni siquiera
-  // entrecomillados: devuelve el texto de ayuda y no ejecuta nada.
-  const spaced = [selectedPlayer, ...others].filter((p) => /\s/.test(p));
+  const onOff = (act, label) => `
+    <div class="pl-mode">
+      <span>${esc(label)}</span>
+      <button class="btn btn-ok btn-sm" data-act="${act}" data-v="-true">Activar</button>
+      <button class="btn btn-ghost btn-sm" data-act="${act}" data-v="-false">Quitar</button>
+    </div>`;
 
   host.innerHTML = `
-    ${spaced.length ? `<div class="issue err" style="margin-bottom:14px">
-      <div class="issue-main">
-        <div class="issue-title">Nombres con espacio</div>
-        <div class="issue-body">
-          <code>${esc(spaced.join('</code>, <code>'))}</code> llevan espacios, y el parser de
-          comandos de Zomboid los rechaza aunque vayan entre comillas: el servidor responde con
-          el texto de ayuda y no hace nada. Los comandos que apunten a esos jugadores fallarán.
-        </div>
-      </div>
-    </div>` : ''}
-
     <div class="pl-block">
       <label class="pl-field">
         <span>Dar un objeto</span>
@@ -567,7 +566,7 @@ function renderPlayerPanel() {
         <datalist id="pl-item-list">
           ${ITEMS.map(([id, n]) => `<option value="${esc(id)}">${esc(n)}</option>`).join('')}
         </datalist>
-        <p class="pl-hint">Puedes escribir cualquier id, también de mods. Las sugerencias son solo eso.</p>
+        <p class="pl-hint">Puedes escribir cualquier id, también de mods. Distingue mayúsculas.</p>
       </label>
     </div>
 
@@ -581,8 +580,11 @@ function renderPlayerPanel() {
           <input id="pl-skill-n" class="set-input set-num" type="number" value="1000" min="1" max="9999999" step="100">
           <button class="btn btn-primary btn-sm" data-act="addxp">Dar</button>
         </div>
-        <p class="pl-hint">Son <b>puntos de XP</b>, no niveles. Orientativo: subir de nivel 0 a 1
-          cuesta unos 75 puntos, y de 4 a 5 unos 3.000.</p>
+        <label class="check" style="margin-top:8px">
+          <input type="checkbox" id="pl-xp-mult"><span>Aplicar el multiplicador de XP del servidor</span>
+        </label>
+        <p class="pl-hint">Son <b>puntos de XP</b>, no niveles. De nivel 0 a 1 son unos 75 puntos;
+          de 4 a 5, unos 3.000.</p>
       </label>
     </div>
 
@@ -595,20 +597,32 @@ function renderPlayerPanel() {
               ? others.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`).join('')
               : '<option>no hay nadie más conectado</option>'}
           </select>
-          <button class="btn btn-primary btn-sm" data-act="teleport" ${others.length ? '' : 'disabled'}>Llevar</button>
+          <button class="btn btn-primary btn-sm" data-act="teleportplayer" ${others.length ? '' : 'disabled'}>Llevar</button>
         </div>
-        <p class="pl-hint">A coordenadas concretas no se puede desde aquí: usa el panel de admin dentro del juego.</p>
+        <p class="pl-hint">A coordenadas no se puede desde la consola: usa el panel de admin del juego.</p>
       </label>
     </div>
 
     <div class="pl-block">
       <span class="pl-legend">Modos especiales</span>
-      <div class="pl-toggles">
-        <button class="pl-toggle" data-act="godmod">Modo dios</button>
-        <button class="pl-toggle" data-act="invisible">Invisible</button>
-        <button class="pl-toggle" data-act="noclip">Atravesar paredes</button>
+      ${onOff('godmodplayer', 'Modo dios')}
+      ${onOff('invisibleplayer', 'Invisible para los zombis')}
+      ${onOff('noclip', 'Atravesar paredes')}
+      ${onOff('voiceban', 'Silenciar el chat de voz')}
+    </div>
+
+    <div class="pl-block">
+      <span class="pl-legend">Sobre su posición</span>
+      <div class="pl-row">
+        <input id="pl-horde" class="set-input set-num" type="number" value="50" min="1" max="1000" step="10">
+        <button class="btn btn-warn btn-sm" data-act="createhorde">Soltar horda</button>
+        <button class="btn btn-ghost btn-sm" data-act="thunder">Trueno</button>
+        <button class="btn btn-ghost btn-sm" data-act="lightning">Rayo</button>
       </div>
-      <p class="pl-hint">Son interruptores: el mismo comando lo activa y lo desactiva.</p>
+      <div class="pl-row" style="margin-top:8px">
+        <input id="pl-vehicle" class="set-input" placeholder="Base.VanAmbulance">
+        <button class="btn btn-ghost btn-sm" data-act="addvehicle">Aparecer vehículo</button>
+      </div>
     </div>
 
     <div class="pl-block">
@@ -624,14 +638,29 @@ function renderPlayerPanel() {
     </div>
 
     <div class="pl-block">
+      <label class="pl-field">
+        <span>Cuenta y lista blanca</span>
+        <div class="pl-row">
+          <input id="pl-pass" class="set-input" placeholder="Contraseña">
+          <button class="btn btn-ghost btn-sm" data-act="adduser">Crear usuario</button>
+          <button class="btn btn-ghost btn-sm" data-act="setpassword">Cambiar contraseña</button>
+        </div>
+        <div class="pl-row" style="margin-top:8px">
+          <button class="btn btn-ghost btn-sm" data-act="removeuserfromwhitelist">Quitar de la lista blanca</button>
+        </div>
+      </label>
+    </div>
+
+    <div class="pl-block">
       <span class="pl-legend">Moderación</span>
       <div class="pl-row" style="margin-bottom:8px">
         <input id="pl-reason" class="set-input" placeholder="Motivo (opcional)">
+        <label class="check"><input type="checkbox" id="pl-banip"><span>Banear también su IP</span></label>
       </div>
       <div class="pl-row">
-        <button class="btn btn-ghost btn-sm" data-act="whitelist">Añadir a lista blanca</button>
         <button class="btn btn-warn btn-sm" data-act="kick">Expulsar</button>
-        <button class="btn btn-danger btn-sm" data-act="ban">Banear</button>
+        <button class="btn btn-danger btn-sm" data-act="banuser">Banear</button>
+        <button class="btn btn-ghost btn-sm" data-act="unbanuser">Desbanear</button>
       </div>
     </div>`;
 }
@@ -651,7 +680,10 @@ $('#pl-actions').addEventListener('click', async (e) => {
   if (!b || !selectedPlayer) return;
   const who = q(selectedPlayer);
 
-  switch (b.dataset.act) {
+  const act = b.dataset.act;
+  const v = b.dataset.v || '';
+
+  switch (act) {
     case 'additem': {
       const item = $('#pl-item').value.trim();
       if (!item) return toast('Escribe el id del objeto', 'err');
@@ -661,35 +693,67 @@ $('#pl-actions').addEventListener('click', async (e) => {
     case 'addxp': {
       const skill = $('#pl-skill').value;
       const n = Math.max(1, parseInt($('#pl-skill-n').value, 10) || 1);
-      return runCmd(`addxp ${who} ${skill}=${n}`, `${skill} +${n} para ${selectedPlayer}`);
+      const mult = $('#pl-xp-mult').checked ? ' -true' : '';
+      return runCmd(`addxp ${who} ${skill}=${n}${mult}`, `${skill} +${n} XP para ${selectedPlayer}`);
     }
-    case 'teleport': {
+    // teleport mueve a QUIEN ejecuta el comando, y en la consola no hay nadie:
+    // para mover a un tercero el comando es teleportplayer
+    case 'teleportplayer': {
       const to = $('#pl-tp').value;
-      if (!to) return;
-      return runCmd(`teleport ${who} ${q(to)}`, `${selectedPlayer} llevado junto a ${to}`);
+      if (!to) return undefined;
+      return runCmd(`teleportplayer ${who} ${q(to)}`, `${selectedPlayer} llevado junto a ${to}`);
     }
-    case 'godmod':
-    case 'invisible':
+    // godmod e invisible son para uno mismo; las versiones "player" son estas
+    case 'godmodplayer':
+    case 'invisibleplayer':
     case 'noclip':
-      return runCmd(`${b.dataset.act} ${who}`, `${b.dataset.act} conmutado para ${selectedPlayer}`);
+    case 'voiceban':
+      return runCmd(`${act} ${who} ${v}`,
+        `${act} ${v === '-true' ? 'activado' : 'quitado'} para ${selectedPlayer}`);
+    case 'createhorde': {
+      const n = Math.max(1, parseInt($('#pl-horde').value, 10) || 1);
+      if (!await confirmDialog('Soltar una horda',
+        `Aparecerán ${n} zombis junto a ${selectedPlayer}.`, 'Soltar')) return undefined;
+      return runCmd(`createhorde ${n} ${who}`, `${n} zombis junto a ${selectedPlayer}`);
+    }
+    case 'thunder':
+    case 'lightning':
+      return runCmd(`${act} ${who}`, `${act} sobre ${selectedPlayer}`);
+    case 'addvehicle': {
+      const script = $('#pl-vehicle').value.trim();
+      if (!script) return toast('Escribe el script del vehículo', 'err');
+      return runCmd(`addvehicle ${q(script)} ${who}`, `${script} junto a ${selectedPlayer}`);
+    }
     case 'setaccesslevel':
-      // el nivel va SIN comillas: entrecomillado llega vacio al servidor
-      return runCmd(`setaccesslevel ${who} ${$('#pl-level').value}`,
+      return runCmd(`setaccesslevel ${who} ${q($('#pl-level').value)}`,
         `${selectedPlayer} ahora es ${$('#pl-level').value}`);
-    case 'whitelist':
-      return runCmd(`addusertowhitelist ${who}`, `${selectedPlayer} añadido a la lista blanca`);
+    case 'adduser': {
+      const p = $('#pl-pass').value.trim();
+      if (!p) return toast('Escribe una contraseña', 'err');
+      return runCmd(`adduser ${who} ${q(p)}`, `Usuario ${selectedPlayer} creado`);
+    }
+    case 'setpassword': {
+      const p = $('#pl-pass').value.trim();
+      if (!p) return toast('Escribe la nueva contraseña', 'err');
+      return runCmd(`setpassword ${who} ${q(p)}`, `Contraseña de ${selectedPlayer} cambiada`);
+    }
+    case 'removeuserfromwhitelist':
+      return runCmd(`removeuserfromwhitelist ${who}`, `${selectedPlayer} fuera de la lista blanca`);
     case 'kick': {
       if (!await confirmDialog('Expulsar jugador',
-        `Se echará a ${selectedPlayer} del servidor. Podrá volver a entrar.`, 'Expulsar')) return;
+        `Se echará a ${selectedPlayer}. Podrá volver a entrar.`, 'Expulsar')) return undefined;
       const r = $('#pl-reason').value.trim();
       return runCmd(`kick ${who}${r ? ` -r ${q(r)}` : ''}`, `${selectedPlayer} expulsado`);
     }
-    case 'ban': {
+    case 'banuser': {
       if (!await confirmDialog('Banear jugador',
-        `${selectedPlayer} no podrá volver a entrar hasta que lo desbanees.`, 'Banear')) return;
+        `${selectedPlayer} no podrá volver a entrar hasta que lo desbanees.`, 'Banear')) return undefined;
       const r = $('#pl-reason').value.trim();
-      return runCmd(`banuser ${who}${r ? ` -r ${q(r)}` : ''}`, `${selectedPlayer} baneado`);
+      const ip = $('#pl-banip').checked ? ' -ip' : '';
+      return runCmd(`banuser ${who}${ip}${r ? ` -r ${q(r)}` : ''}`, `${selectedPlayer} baneado`);
     }
+    case 'unbanuser':
+      return runCmd(`unbanuser ${who}`, `${selectedPlayer} desbaneado`);
     default:
   }
   return undefined;
@@ -1199,31 +1263,52 @@ const SETTINGS = [
   },
 ];
 
+/**
+ * Sacados de la salida de `help` del propio servidor, no de wikis: varias
+ * documentan comandos que en esta build no existen (grantadmin, removeadmin,
+ * addusertowhitelist) o confunden las versiones "para mi" con las "para otro"
+ * (godmod vs godmodplayer).
+ */
 const COMMANDS = [
+  { c: 'help', d: 'Lista todos los comandos de tu servidor' },
   { c: 'players', d: 'Lista los jugadores conectados' },
   { c: 'save', d: 'Guarda el mundo ahora mismo' },
-  { c: 'servermsg "texto"', d: 'Mensaje en pantalla para todos' },
-  { c: 'kick "usuario"', d: 'Expulsa a un jugador' },
-  { c: 'banuser "usuario"', d: 'Banea por nombre de usuario' },
-  { c: 'unbanuser "usuario"', d: 'Le quita el baneo' },
-  { c: 'grantadmin "usuario"', d: 'Le da permisos de administrador' },
-  { c: 'removeadmin "usuario"', d: 'Le quita los permisos' },
-  { c: 'addusertowhitelist "usuario"', d: 'Lo añade a la lista blanca' },
-  { c: 'teleport "origen" "destino"', d: 'Lleva un jugador junto a otro' },
-  { c: 'additem "usuario" "Base.Axe"', d: 'Le da un objeto' },
-  { c: 'godmod "usuario"', d: 'Invulnerabilidad on/off' },
-  { c: 'invisible "usuario"', d: 'Los zombis dejan de verlo' },
-  { c: 'noclip "usuario"', d: 'Atravesar paredes' },
-  { c: 'alarm', d: 'Dispara la alarma del edificio donde estés' },
-  { c: 'chopper', d: 'Lanza el evento del helicóptero' },
-  { c: 'gunshot', d: 'Suena un disparo y atrae zombis' },
-  { c: 'startrain', d: 'Empieza a llover' },
-  { c: 'stoprain', d: 'Deja de llover' },
-  { c: 'startstorm', d: 'Desata una tormenta' },
-  { c: 'checkModsNeedUpdate', d: 'Comprueba si hay mods desactualizados' },
-  { c: 'reloadoptions', d: 'Recarga parte del .ini sin reiniciar' },
-  { c: 'showoptions', d: 'Muestra todas las opciones actuales' },
   { c: 'quit', d: 'Guarda y apaga el servidor' },
+  { c: 'servermsg "texto"', d: 'Mensaje en pantalla para todos' },
+  { c: 'showoptions', d: 'Muestra todas las opciones actuales' },
+  { c: 'reloadoptions', d: 'Recarga el .ini y lo envía a los clientes' },
+  { c: 'changeoption Opcion "valor"', d: 'Cambia una opción en caliente' },
+  { c: 'checkModsNeedUpdate', d: 'Comprueba si hay mods desactualizados' },
+  { c: 'setTimeSpeed 10', d: 'Multiplicador de velocidad del tiempo' },
+  { c: 'additem "usuario" "Base.Axe" 5', d: 'Le da un objeto (distingue mayúsculas)' },
+  { c: 'addxp "usuario" Woodwork=1000', d: 'Le da puntos de XP en una habilidad' },
+  { c: 'addkey "usuario" "idLlave"', d: 'Le da una llave' },
+  { c: 'addvehicle "Base.VanAmbulance" "usuario"', d: 'Aparece un vehículo junto a él' },
+  { c: 'teleportplayer "origen" "destino"', d: 'Lleva un jugador junto a otro' },
+  { c: 'teleport "usuario"', d: 'Te lleva a ti (no sirve desde la consola)' },
+  { c: 'godmodplayer "usuario" -true', d: 'Invulnerabilidad para otro jugador' },
+  { c: 'invisibleplayer "usuario" -true', d: 'Los zombis dejan de verlo' },
+  { c: 'noclip "usuario" -true', d: 'Atravesar paredes' },
+  { c: 'voiceban "usuario" -true', d: 'Le corta el chat de voz' },
+  { c: 'setaccesslevel "usuario" "moderator"', d: 'user, priority, observer, gm, moderator, admin' },
+  { c: 'adduser "usuario" "contraseña"', d: 'Crea una cuenta en la lista blanca' },
+  { c: 'setpassword "usuario" "nueva"', d: 'Le cambia la contraseña' },
+  { c: 'removeuserfromwhitelist "usuario"', d: 'Lo quita de la lista blanca' },
+  { c: 'kick "usuario" -r "motivo"', d: 'Lo expulsa' },
+  { c: 'banuser "usuario" -ip -r "motivo"', d: 'Lo banea, opcionalmente por IP' },
+  { c: 'unbanuser "usuario"', d: 'Le quita el baneo' },
+  { c: 'banid SteamID', d: 'Banea por SteamID' },
+  { c: 'createhorde 150 "usuario"', d: 'Suelta una horda junto a él' },
+  { c: 'chopper', d: 'Helicóptero sobre un jugador al azar' },
+  { c: 'gunshot', d: 'Disparo sobre un jugador al azar' },
+  { c: 'thunder "usuario"', d: 'Trueno sobre él (usuario obligatorio aquí)' },
+  { c: 'lightning "usuario"', d: 'Rayo sobre él (usuario obligatorio aquí)' },
+  { c: 'startrain 50', d: 'Empieza a llover, intensidad 1-100' },
+  { c: 'startstorm 4', d: 'Tormenta, duración en horas de juego' },
+  { c: 'stoprain', d: 'Deja de llover' },
+  { c: 'stopweather', d: 'Corta cualquier clima activo' },
+  { c: 'releasesafehouse "titulo"', d: 'Libera un refugio' },
+  { c: 'stats help', d: 'Estadísticas del servidor' },
 ];
 
 /** Valor actual de un control, siempre como texto (lo que va al .ini). */
