@@ -460,9 +460,19 @@ const ITEMS = [
   ['Base.Chips', 'Patatas fritas'],
 ];
 
+/**
+ * Lista exacta que devuelve el propio servidor al rechazar un nivel invalido:
+ *   "list of access level: banned, user, priority, observer, gm, moderator, admin"
+ * Ni 'none' ni 'overseer' existen, aunque varias wikis los den por buenos.
+ */
 const ACCESS_LEVELS = [
-  ['admin', 'Admin — todo'], ['moderator', 'Moderador'], ['overseer', 'Supervisor'],
-  ['gm', 'GM'], ['observer', 'Observador'], ['none', 'Ninguno — jugador normal'],
+  ['user', 'Jugador normal'],
+  ['priority', 'Prioritario — se salta la cola'],
+  ['observer', 'Observador'],
+  ['gm', 'GM'],
+  ['moderator', 'Moderador'],
+  ['admin', 'Admin — todo'],
+  ['banned', 'Baneado'],
 ];
 
 const WORLD_EVENTS = [
@@ -663,7 +673,8 @@ $('#pl-actions').addEventListener('click', async (e) => {
     case 'noclip':
       return runCmd(`${b.dataset.act} ${who}`, `${b.dataset.act} conmutado para ${selectedPlayer}`);
     case 'setaccesslevel':
-      return runCmd(`setaccesslevel ${who} ${q($('#pl-level').value)}`,
+      // el nivel va SIN comillas: entrecomillado llega vacio al servidor
+      return runCmd(`setaccesslevel ${who} ${$('#pl-level').value}`,
         `${selectedPlayer} ahora es ${$('#pl-level').value}`);
     case 'whitelist':
       return runCmd(`addusertowhitelist ${who}`, `${selectedPlayer} añadido a la lista blanca`);
