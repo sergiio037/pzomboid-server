@@ -64,56 +64,118 @@ async function findModInfos(dir, depth = 0, acc = []) {
 
 /* ------------------------------------------------------------- listado */
 
-async function listMods() {
-  await fsp.mkdir(CFG.modsDir, { recursive: true });
-  const ini = await readIni();
-  const enabledIds = iniGetList(ini, 'Mods');
-  const workshop = iniGetList(ini, 'WorkshopItems');
+const PZ_WORKSHOP_APPID = '108600';
 
+/**
+ * Los mods viven en dos sitios distintos y hay que mirar en los dos:
+ *   - manuales : <Zomboid>/mods/<Mod>/mod.info
+ *   - Workshop : steamapps/workshop/content/108600/<idWorkshop>/mods/<Mod>/mod.info
+ *
+ * SteamCMD deja el contenido del Workshop junto a la instalacion del servidor,
+ * pero segun como se lance puede acabar bajo Zomboid o bajo ~/Steam. Probamos
+ * las tres rutas y usamos las que existan.
+ */
+function workshopRoots() {
+  const rel = ['steamapps', 'workshop', 'content', PZ_WORKSHOP_APPID];
+  return [
+    path.join(CFG.serverDir, ...rel),
+    path.join(CFG.zomboidDir, ...rel),
+    path.join(path.dirname(CFG.zomboidDir), 'Steam', ...rel),
+  ];
+}
+
+/** Lee una carpeta que contiene uno o varios mod.info y devuelve sus metadatos. */
+async function readModFolder(full) {
+  const infos = await findModInfos(full);
+  const parsed = [];
+  for (const f of infos) {
+    const meta = await parseModInfo(f);
+    if (meta.id) parsed.push(meta);
+  }
+  // deduplicamos por id: B42 repite el mod en una carpeta por version
+  const seen = new Set();
+  const entries = parsed.filter((m) => (seen.has(m.id) ? false : seen.add(m.id)));
+
+  const [size, stat] = await Promise.all([
+    dirSize(full),
+    fsp.stat(full).catch(() => null),
+  ]);
+
+  return { entries, ids: entries.map((m) => m.id), size, mtime: stat ? stat.mtimeMs : 0 };
+}
+
+async function scanLocal() {
+  await fsp.mkdir(CFG.modsDir, { recursive: true });
   let dirs = [];
   try {
     dirs = (await fsp.readdir(CFG.modsDir, { withFileTypes: true }))
       .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
       .map((e) => e.name);
-  } catch { /* carpeta vacia */ }
+  } catch { return []; }
 
-  const mods = [];
+  const out = [];
   for (const folder of dirs) {
-    const full = path.join(CFG.modsDir, folder);
-    const infos = await findModInfos(full);
-    const parsed = [];
-    for (const f of infos) {
-      const meta = await parseModInfo(f);
-      if (meta.id) parsed.push(meta);
-    }
-    // deduplicamos por id (B42 repite el mod en varias carpetas de version)
-    const seen = new Set();
-    const unique = parsed.filter((m) => (seen.has(m.id) ? false : seen.add(m.id)));
-
-    const [size, stat] = await Promise.all([
-      dirSize(full),
-      fsp.stat(full).catch(() => null),
-    ]);
-
-    mods.push({
-      folder,
-      size,
-      mtime: stat ? stat.mtimeMs : 0,
-      entries: unique,
-      ids: unique.map((m) => m.id),
-      enabled: unique.some((m) => enabledIds.includes(m.id)),
-      valid: unique.length > 0,
-    });
+    const data = await readModFolder(path.join(CFG.modsDir, folder));
+    out.push({ folder, source: 'local', workshopId: null, ...data });
   }
+  return out;
+}
 
-  mods.sort((a, b) => a.folder.localeCompare(b.folder));
+async function scanWorkshop() {
+  const out = [];
+  const seenIds = new Set();
 
-  // ids activos en el .ini que no corresponden a ninguna carpeta local:
-  // vienen de mods del Workshop que descarga el propio servidor
-  const localIds = new Set(mods.flatMap((m) => m.ids));
-  const orphanIds = enabledIds.filter((id) => !localIds.has(id));
+  for (const root of workshopRoots()) {
+    let dirs = [];
+    try {
+      dirs = (await fsp.readdir(root, { withFileTypes: true }))
+        .filter((e) => e.isDirectory() && /^\d+$/.test(e.name))
+        .map((e) => e.name);
+    } catch { continue; }
 
-  return { mods, enabledIds, workshop, orphanIds };
+    for (const wsId of dirs) {
+      if (seenIds.has(wsId)) continue;
+      seenIds.add(wsId);
+      const data = await readModFolder(path.join(root, wsId));
+      out.push({ folder: wsId, source: 'workshop', workshopId: wsId, ...data });
+    }
+  }
+  return out;
+}
+
+async function listMods() {
+  const ini = await readIni();
+  const enabledIds = iniGetList(ini, 'Mods');
+  const workshop = iniGetList(ini, 'WorkshopItems');
+
+  const [local, ws] = await Promise.all([scanLocal(), scanWorkshop()]);
+  const mods = [...local, ...ws].map((m) => ({
+    ...m,
+    enabled: m.ids.some((id) => enabledIds.includes(id)),
+    valid: m.ids.length > 0,
+  }));
+
+  mods.sort((a, b) => {
+    if (a.source !== b.source) return a.source === 'local' ? -1 : 1;
+    return (a.entries[0]?.name || a.folder).localeCompare(b.entries[0]?.name || b.folder);
+  });
+
+  const foundIds = new Set(mods.flatMap((m) => m.ids));
+  const downloadedWs = new Set(ws.map((m) => m.workshopId));
+
+  return {
+    mods,
+    enabledIds,
+    workshop,
+    // en Mods= pero sin carpeta en disco: id mal escrito o mod sin descargar
+    orphanIds: enabledIds.filter((id) => !foundIds.has(id)),
+    // en WorkshopItems= pero no descargado todavia
+    pendingWorkshop: workshop.filter((id) => !downloadedWs.has(id)),
+    // descargado y con Mod ID, pero sin activar en Mods=
+    inactiveIds: mods
+      .filter((m) => m.valid && !m.enabled)
+      .flatMap((m) => m.ids.map((id) => ({ id, source: m.source, folder: m.folder }))),
+  };
 }
 
 /* ------------------------------------------------------- activar/desactivar */

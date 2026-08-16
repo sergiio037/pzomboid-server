@@ -431,16 +431,66 @@ async function loadMods() {
   catch (e) { toast(e.message, 'err'); }
 }
 
+function renderModIssues(d) {
+  const out = [];
+
+  if (d.pendingWorkshop?.length) {
+    out.push(`<div class="issue">
+      <div class="issue-main">
+        <div class="issue-title">${d.pendingWorkshop.length} mod(s) del Workshop sin descargar</div>
+        <div class="issue-body">Están en <code>WorkshopItems=</code> pero no aparecen en disco:
+          <code>${esc(d.pendingWorkshop.join(', '))}</code>.
+          El servidor los baja al arrancar, así que reinicia y vuelve a mirar.</div>
+      </div>
+      <button class="btn btn-warn btn-sm" data-power="restart">Reiniciar</button>
+    </div>`);
+  }
+
+  if (d.inactiveIds?.length) {
+    const ids = d.inactiveIds.map((x) => x.id);
+    out.push(`<div class="issue">
+      <div class="issue-main">
+        <div class="issue-title">${ids.length} mod(s) descargados pero sin activar</div>
+        <div class="issue-body">Están en disco pero su Mod ID no está en <code>Mods=</code>, así que el
+          servidor no los carga: <code>${esc(ids.join(', '))}</code></div>
+      </div>
+      <button class="btn btn-primary btn-sm" id="mods-enable-all">Activar todos</button>
+    </div>`);
+  }
+
+  if (d.orphanIds?.length) {
+    out.push(`<div class="issue err">
+      <div class="issue-main">
+        <div class="issue-title">${d.orphanIds.length} Mod ID activo(s) que no existen en disco</div>
+        <div class="issue-body">Están en <code>Mods=</code> pero no hay ninguna carpeta con ese id:
+          <code>${esc(d.orphanIds.join(', '))}</code>.
+          Suele ser un id mal escrito, o falta su ID del Workshop. Con esto el servidor puede negarse a arrancar.</div>
+      </div>
+    </div>`);
+  }
+
+  $('#mod-issues').innerHTML = out.join('');
+}
+
 function renderMods(data) {
   const { mods = [], enabledIds = [], workshop = [] } = data;
   $('#mods-count').textContent = mods.length;
+  renderModIssues(data);
 
   $('#mod-list').innerHTML = mods.length ? mods.map((m) => {
     const first = m.entries[0];
     const title = first ? first.name : m.folder;
+    const badge = m.source === 'workshop'
+      ? `<span class="mod-src ws" title="Descargado del Workshop">WS ${esc(m.workshopId)}</span>`
+      : '<span class="mod-src local" title="Instalado a mano">manual</span>';
     const meta = m.valid
       ? `${m.ids.join(', ')} · ${fmtBytes(m.size)}`
       : `sin mod.info válido · ${fmtBytes(m.size)}`;
+    // los del Workshop no se borran: el servidor los volveria a bajar al
+    // arrancar. Se quitan retirando su ID de la lista del Workshop.
+    const del = m.source === 'local'
+      ? `<button class="icon-btn" data-del-mod="${esc(m.folder)}" title="Borrar mod">${ICON_TRASH}</button>`
+      : '';
     return `
       <div class="mod ${m.valid ? '' : 'invalid'}">
         <label class="switch" title="${m.valid ? 'Activar / desactivar' : 'No se puede activar'}">
@@ -449,12 +499,12 @@ function renderMods(data) {
           <i></i>
         </label>
         <div class="mod-main">
-          <div class="mod-name">${esc(title)}</div>
+          <div class="mod-name">${esc(title)} ${badge}</div>
           <div class="mod-meta">${esc(meta)}</div>
         </div>
-        <button class="icon-btn" data-del-mod="${esc(m.folder)}" title="Borrar mod">${ICON_TRASH}</button>
+        ${del}
       </div>`;
-  }).join('') : '<p class="empty">No hay mods locales. Arrastra un .zip o una carpeta arriba.</p>';
+  }).join('') : '<p class="empty">No se ha encontrado ningún mod, ni manual ni del Workshop.</p>';
 
   $('#ws-list').innerHTML = workshop.length ? workshop.map((id) => `
     <span class="tag">${esc(id)}<button data-del-ws="${esc(id)}" title="Quitar">×</button></span>`).join('')
@@ -468,6 +518,18 @@ function renderMods(data) {
 }
 
 $('#mods-refresh').addEventListener('click', loadMods);
+
+$('#mod-issues').addEventListener('click', async (e) => {
+  if (!e.target.closest('#mods-enable-all')) return;
+  const add = (window.__mods?.inactiveIds || []).map((x) => x.id);
+  if (!add.length) return;
+  try {
+    renderMods(await jpost('/api/mods/enabled', {
+      ids: [...(window.__mods?.enabledIds || []), ...add],
+    }));
+    toast(`${add.length} mod(s) activados. Reinicia para aplicarlo.`, 'ok');
+  } catch (err) { toast(err.message, 'err'); }
+});
 
 $('#mod-list').addEventListener('change', async (e) => {
   const cb = e.target.closest('[data-toggle]');

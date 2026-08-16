@@ -274,6 +274,25 @@ em{ font-style:normal; color:var(--txt); }
 .progress > div{ height:100%; width:0; background:var(--accent); transition:width .18s; }
 
 /* -------------------------------------------------------------- mods --- */
+.issue{
+  display:flex; align-items:flex-start; justify-content:space-between; gap:14px;
+  padding:12px 15px; margin-bottom:10px; border-radius:var(--radius);
+  border:1px solid #4d3d14; background:#231d0c; flex-wrap:wrap;
+}
+.issue.err{ border-color:#54281e; background:#2a1712; }
+.issue-main{ flex:1 1 260px; min-width:0; }
+.issue-title{ font-size:13px; font-weight:650; color:var(--amber); }
+.issue.err .issue-title{ color:#eda78f; }
+.issue-body{ font-size:12.2px; color:var(--txt-dim); margin-top:3px; overflow-wrap:anywhere; }
+.issue-body code{ color:var(--txt); }
+
+.mod-src{
+  padding:1px 6px; border-radius:99px; font-size:9.5px; font-weight:700;
+  letter-spacing:.04em; text-transform:uppercase; flex:none;
+}
+.mod-src.ws{ background:#12262e; color:#7fc4dd; border:1px solid #1d3e4a; }
+.mod-src.local{ background:#243019; color:var(--accent); border:1px solid #33421f; }
+
 .mod-list{ display:grid; gap:8px; max-height:560px; overflow:auto; }
 .mod{
   display:flex; align-items:center; gap:12px; padding:11px 12px;
