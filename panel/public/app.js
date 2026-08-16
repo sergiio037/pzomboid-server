@@ -530,7 +530,22 @@ function renderPlayerPanel() {
 
   const others = players.filter((p) => p !== selectedPlayer);
 
+  // El parser de comandos de Zomboid no traga nombres con espacio ni siquiera
+  // entrecomillados: devuelve el texto de ayuda y no ejecuta nada.
+  const spaced = [selectedPlayer, ...others].filter((p) => /\s/.test(p));
+
   host.innerHTML = `
+    ${spaced.length ? `<div class="issue err" style="margin-bottom:14px">
+      <div class="issue-main">
+        <div class="issue-title">Nombres con espacio</div>
+        <div class="issue-body">
+          <code>${esc(spaced.join('</code>, <code>'))}</code> llevan espacios, y el parser de
+          comandos de Zomboid los rechaza aunque vayan entre comillas: el servidor responde con
+          el texto de ayuda y no hace nada. Los comandos que apunten a esos jugadores fallarán.
+        </div>
+      </div>
+    </div>` : ''}
+
     <div class="pl-block">
       <label class="pl-field">
         <span>Dar un objeto</span>
@@ -553,10 +568,11 @@ function renderPlayerPanel() {
           <select id="pl-skill" class="set-input">
             ${SKILLS.map(([k, n]) => `<option value="${esc(k)}">${esc(n)}</option>`).join('')}
           </select>
-          <input id="pl-skill-n" class="set-input set-num" type="number" value="1" min="1" max="10">
+          <input id="pl-skill-n" class="set-input set-num" type="number" value="1000" min="1" max="9999999" step="100">
           <button class="btn btn-primary btn-sm" data-act="addxp">Dar</button>
         </div>
-        <p class="pl-hint">El número son niveles de la habilidad, no puntos sueltos.</p>
+        <p class="pl-hint">Son <b>puntos de XP</b>, no niveles. Orientativo: subir de nivel 0 a 1
+          cuesta unos 75 puntos, y de 4 a 5 unos 3.000.</p>
       </label>
     </div>
 
