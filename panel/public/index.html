@@ -65,6 +65,9 @@
       <button class="nav-item" data-view="console">
         <svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M8 10l2.5 2L8 14M13 15h4"/></svg>Consola
       </button>
+      <button class="nav-item" data-view="players">
+        <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20v-1.5C3 16 5.7 15 9 15s6 1 6 3.5V20"/><path d="M16.5 8.2a3 3 0 0 1 0 5.6M18 15.2c2 .5 3 1.6 3 3.3V20"/></svg>Jugadores
+      </button>
       <button class="nav-item" data-view="mods">
         <svg viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg>Mods
       </button>
@@ -192,6 +195,42 @@
             <button class="btn btn-primary btn-sm" type="submit">Enviar</button>
           </form>
           <div class="chips" id="cmd-chips"></div>
+        </div>
+      </section>
+
+      <!-- -------------------------------------------------- JUGADORES -->
+      <section class="view" data-view="players">
+        <div class="pl-grid">
+          <div class="card">
+            <div class="card-head">
+              <h3>Conectados <span class="count" id="pl-count">0</span></h3>
+              <button class="btn btn-ghost btn-sm" id="pl-refresh">Refrescar</button>
+            </div>
+            <p class="hint">Se consulta al servidor con el comando <code>players</code>.</p>
+            <div class="pl-list" id="pl-list"></div>
+          </div>
+
+          <div class="card" id="pl-panel">
+            <div class="card-head"><h3 id="pl-target">Ningún jugador seleccionado</h3></div>
+            <div id="pl-actions"><p class="empty">Elige un jugador de la lista para actuar sobre él.</p></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h3>Acciones sobre el servidor</h3></div>
+          <div class="pl-block">
+            <label class="pl-field">
+              <span>Mensaje a todos los jugadores</span>
+              <div class="pl-row">
+                <input id="pl-msg" type="text" class="set-input" placeholder="Reiniciamos en 5 minutos">
+                <button class="btn btn-primary btn-sm" id="pl-msg-send">Enviar</button>
+              </div>
+            </label>
+          </div>
+          <div class="pl-block">
+            <span class="pl-legend">Eventos del mundo</span>
+            <div class="quick" id="pl-events"></div>
+          </div>
         </div>
       </section>
 

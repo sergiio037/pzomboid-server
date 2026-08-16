@@ -123,7 +123,7 @@ $('#logout-btn').addEventListener('click', async () => {
 /* =============================================================== nav ==== */
 
 const TITLES = {
-  overview: 'Resumen', console: 'Consola', mods: 'Mods',
+  overview: 'Resumen', console: 'Consola', players: 'Jugadores', mods: 'Mods',
   worlds: 'Mundos', settings: 'Ajustes', config: 'Configuración',
 };
 
@@ -132,6 +132,7 @@ function goto(view) {
   $$('.view').forEach((s) => s.classList.toggle('is-active', s.dataset.view === view));
   $('#view-title').textContent = TITLES[view] || view;
   location.hash = view;
+  if (view === 'players') loadPlayers();
   if (view === 'mods') loadMods();
   if (view === 'worlds') loadWorlds();
   if (view === 'settings') loadSettings();
@@ -421,6 +422,261 @@ document.addEventListener('click', async (e) => {
   catch (err) { toast(err.message, 'err'); }
   if (b.dataset.cmd === 'players') setTimeout(refreshPlayers, 300);
 });
+
+/* ========================================================== jugadores === */
+
+/** Nombres de habilidad tal y como los espera addxp (los de MultiplierConfig). */
+const SKILLS = [
+  ['Fitness', 'Forma física'], ['Strength', 'Fuerza'], ['Sprinting', 'Correr'],
+  ['Lightfoot', 'Pies ligeros'], ['Nimble', 'Agilidad'], ['Sneak', 'Sigilo'],
+  ['Axe', 'Hacha'], ['Blunt', 'Contundente largo'], ['SmallBlunt', 'Contundente corto'],
+  ['LongBlade', 'Hoja larga'], ['SmallBlade', 'Hoja corta'], ['Spear', 'Lanza'],
+  ['Maintenance', 'Mantenimiento'], ['Woodwork', 'Carpintería'], ['Cooking', 'Cocina'],
+  ['Farming', 'Agricultura'], ['Doctor', 'Primeros auxilios'], ['Electricity', 'Electricidad'],
+  ['MetalWelding', 'Soldadura'], ['Mechanics', 'Mecánica'], ['Tailoring', 'Costura'],
+  ['Aiming', 'Puntería'], ['Reloading', 'Recarga'], ['Fishing', 'Pesca'],
+  ['Trapping', 'Trampeo'], ['PlantScavenging', 'Forrajeo'], ['FlintKnapping', 'Tallado de piedra'],
+  ['Masonry', 'Albañilería'], ['Pottery', 'Alfarería'], ['Carving', 'Talla'],
+  ['Husbandry', 'Cuidado animal'], ['Tracking', 'Rastreo'], ['Blacksmith', 'Herrería'],
+  ['Butchering', 'Carnicería'], ['Glassmaking', 'Vidriería'],
+];
+
+/** Sugerencias para el campo de objeto. Es libre: puedes escribir cualquier id. */
+const ITEMS = [
+  ['Base.Axe', 'Hacha'], ['Base.HandAxe', 'Hacha de mano'], ['Base.BaseballBat', 'Bate'],
+  ['Base.Crowbar', 'Palanca'], ['Base.Machete', 'Machete'], ['Base.Katana', 'Katana'],
+  ['Base.Sledgehammer', 'Mazo'], ['Base.HuntingKnife', 'Cuchillo de caza'],
+  ['Base.Pistol', 'Pistola 9mm'], ['Base.Shotgun', 'Escopeta'], ['Base.HuntingRifle', 'Rifle de caza'],
+  ['Base.Bullets9mm', 'Balas 9mm'], ['Base.ShotgunShells', 'Cartuchos'],
+  ['Base.Bag_ALICEpack', 'Mochila militar'], ['Base.Bag_BigHikingBag', 'Mochila grande'],
+  ['Base.Bag_DuffelBag', 'Bolsa de lona'],
+  ['Base.Hammer', 'Martillo'], ['Base.Saw', 'Sierra'], ['Base.Screwdriver', 'Destornillador'],
+  ['Base.Wrench', 'Llave inglesa'], ['Base.Lighter', 'Mechero'], ['Base.Torch', 'Linterna'],
+  ['Base.Nails', 'Clavos'], ['Base.Plank', 'Tablón'], ['Base.SheetRope', 'Cuerda de sábanas'],
+  ['Base.Rope', 'Cuerda'], ['Base.PetrolCan', 'Bidón de gasolina'],
+  ['Base.Bandage', 'Venda'], ['Base.Antibiotics', 'Antibióticos'], ['Base.Pills', 'Analgésicos'],
+  ['Base.AlcoholWipes', 'Toallitas de alcohol'],
+  ['Base.WaterBottleFull', 'Botella de agua'], ['Base.TinnedBeans', 'Alubias en lata'],
+  ['Base.Chips', 'Patatas fritas'],
+];
+
+const ACCESS_LEVELS = [
+  ['admin', 'Admin — todo'], ['moderator', 'Moderador'], ['overseer', 'Supervisor'],
+  ['gm', 'GM'], ['observer', 'Observador'], ['none', 'Ninguno — jugador normal'],
+];
+
+const WORLD_EVENTS = [
+  ['chopper', 'Helicóptero'], ['gunshot', 'Disparo lejano'], ['alarm', 'Alarma'],
+  ['startrain', 'Empezar lluvia'], ['stoprain', 'Parar lluvia'],
+  ['startstorm', 'Tormenta'], ['thunder', 'Trueno'], ['lightning', 'Rayo'],
+];
+
+let players = [];
+let selectedPlayer = null;
+
+/** Entrecomilla un nombre para la consola quitando lo que rompería el comando. */
+function q(s) {
+  return `"${String(s == null ? '' : s).replace(/["\r\n]/g, '').trim()}"`;
+}
+
+/** Envia un comando y avisa por toast. */
+async function runCmd(cmd, okText) {
+  try {
+    await jpost('/api/console', { cmd });
+    toast(okText || `Enviado: ${cmd}`, 'ok');
+    return true;
+  } catch (e) {
+    toast(e.message, 'err');
+    return false;
+  }
+}
+
+async function loadPlayers() {
+  const box = $('#pl-list');
+  box.innerHTML = '<p class="empty">consultando…</p>';
+  try {
+    const { players: p, offline } = await api('/api/players');
+    if (offline) {
+      players = [];
+      box.innerHTML = '<p class="empty">El servidor está apagado.</p>';
+    } else if (p.count === null) {
+      players = [];
+      box.innerHTML = '<p class="empty">El servidor no respondió. ¿Está terminando de arrancar?</p>';
+    } else {
+      players = p.names || [];
+      box.innerHTML = players.length
+        ? players.map((n) => `<button class="pl-item${n === selectedPlayer ? ' is-active' : ''}"
+             data-player="${esc(n)}"><i class="pl-dot"></i>${esc(n)}</button>`).join('')
+        : '<p class="empty">No hay nadie conectado.</p>';
+    }
+    $('#pl-count').textContent = players.length;
+  } catch (e) {
+    box.innerHTML = `<p class="empty">${esc(e.message)}</p>`;
+  }
+  if (selectedPlayer && !players.includes(selectedPlayer)) selectedPlayer = null;
+  renderPlayerPanel();
+}
+
+function renderPlayerPanel() {
+  const t = $('#pl-target');
+  const host = $('#pl-actions');
+
+  if (!selectedPlayer) {
+    t.textContent = 'Ningún jugador seleccionado';
+    host.innerHTML = '<p class="empty">Elige un jugador de la lista para actuar sobre él.</p>';
+    return;
+  }
+  t.textContent = selectedPlayer;
+
+  const others = players.filter((p) => p !== selectedPlayer);
+
+  host.innerHTML = `
+    <div class="pl-block">
+      <label class="pl-field">
+        <span>Dar un objeto</span>
+        <div class="pl-row">
+          <input id="pl-item" class="set-input" list="pl-item-list" placeholder="Base.Axe">
+          <input id="pl-item-n" class="set-input set-num" type="number" value="1" min="1" max="500">
+          <button class="btn btn-primary btn-sm" data-act="additem">Dar</button>
+        </div>
+        <datalist id="pl-item-list">
+          ${ITEMS.map(([id, n]) => `<option value="${esc(id)}">${esc(n)}</option>`).join('')}
+        </datalist>
+        <p class="pl-hint">Puedes escribir cualquier id, también de mods. Las sugerencias son solo eso.</p>
+      </label>
+    </div>
+
+    <div class="pl-block">
+      <label class="pl-field">
+        <span>Dar experiencia</span>
+        <div class="pl-row">
+          <select id="pl-skill" class="set-input">
+            ${SKILLS.map(([k, n]) => `<option value="${esc(k)}">${esc(n)}</option>`).join('')}
+          </select>
+          <input id="pl-skill-n" class="set-input set-num" type="number" value="1" min="1" max="10">
+          <button class="btn btn-primary btn-sm" data-act="addxp">Dar</button>
+        </div>
+        <p class="pl-hint">El número son niveles de la habilidad, no puntos sueltos.</p>
+      </label>
+    </div>
+
+    <div class="pl-block">
+      <label class="pl-field">
+        <span>Teleportar junto a otro jugador</span>
+        <div class="pl-row">
+          <select id="pl-tp" class="set-input" ${others.length ? '' : 'disabled'}>
+            ${others.length
+              ? others.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`).join('')
+              : '<option>no hay nadie más conectado</option>'}
+          </select>
+          <button class="btn btn-primary btn-sm" data-act="teleport" ${others.length ? '' : 'disabled'}>Llevar</button>
+        </div>
+        <p class="pl-hint">A coordenadas concretas no se puede desde aquí: usa el panel de admin dentro del juego.</p>
+      </label>
+    </div>
+
+    <div class="pl-block">
+      <span class="pl-legend">Modos especiales</span>
+      <div class="pl-toggles">
+        <button class="pl-toggle" data-act="godmod">Modo dios</button>
+        <button class="pl-toggle" data-act="invisible">Invisible</button>
+        <button class="pl-toggle" data-act="noclip">Atravesar paredes</button>
+      </div>
+      <p class="pl-hint">Son interruptores: el mismo comando lo activa y lo desactiva.</p>
+    </div>
+
+    <div class="pl-block">
+      <label class="pl-field">
+        <span>Nivel de acceso</span>
+        <div class="pl-row">
+          <select id="pl-level" class="set-input">
+            ${ACCESS_LEVELS.map(([v, n]) => `<option value="${esc(v)}">${esc(n)}</option>`).join('')}
+          </select>
+          <button class="btn btn-primary btn-sm" data-act="setaccesslevel">Aplicar</button>
+        </div>
+      </label>
+    </div>
+
+    <div class="pl-block">
+      <span class="pl-legend">Moderación</span>
+      <div class="pl-row" style="margin-bottom:8px">
+        <input id="pl-reason" class="set-input" placeholder="Motivo (opcional)">
+      </div>
+      <div class="pl-row">
+        <button class="btn btn-ghost btn-sm" data-act="whitelist">Añadir a lista blanca</button>
+        <button class="btn btn-warn btn-sm" data-act="kick">Expulsar</button>
+        <button class="btn btn-danger btn-sm" data-act="ban">Banear</button>
+      </div>
+    </div>`;
+}
+
+$('#pl-list').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-player]');
+  if (!b) return;
+  selectedPlayer = b.dataset.player;
+  $$('.pl-item').forEach((x) => x.classList.toggle('is-active', x === b));
+  renderPlayerPanel();
+});
+
+$('#pl-refresh').addEventListener('click', loadPlayers);
+
+$('#pl-actions').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-act]');
+  if (!b || !selectedPlayer) return;
+  const who = q(selectedPlayer);
+
+  switch (b.dataset.act) {
+    case 'additem': {
+      const item = $('#pl-item').value.trim();
+      if (!item) return toast('Escribe el id del objeto', 'err');
+      const n = Math.max(1, parseInt($('#pl-item-n').value, 10) || 1);
+      return runCmd(`additem ${who} ${q(item)} ${n}`, `${n} × ${item} para ${selectedPlayer}`);
+    }
+    case 'addxp': {
+      const skill = $('#pl-skill').value;
+      const n = Math.max(1, parseInt($('#pl-skill-n').value, 10) || 1);
+      return runCmd(`addxp ${who} ${skill}=${n}`, `${skill} +${n} para ${selectedPlayer}`);
+    }
+    case 'teleport': {
+      const to = $('#pl-tp').value;
+      if (!to) return;
+      return runCmd(`teleport ${who} ${q(to)}`, `${selectedPlayer} llevado junto a ${to}`);
+    }
+    case 'godmod':
+    case 'invisible':
+    case 'noclip':
+      return runCmd(`${b.dataset.act} ${who}`, `${b.dataset.act} conmutado para ${selectedPlayer}`);
+    case 'setaccesslevel':
+      return runCmd(`setaccesslevel ${who} ${q($('#pl-level').value)}`,
+        `${selectedPlayer} ahora es ${$('#pl-level').value}`);
+    case 'whitelist':
+      return runCmd(`addusertowhitelist ${who}`, `${selectedPlayer} añadido a la lista blanca`);
+    case 'kick': {
+      if (!await confirmDialog('Expulsar jugador',
+        `Se echará a ${selectedPlayer} del servidor. Podrá volver a entrar.`, 'Expulsar')) return;
+      const r = $('#pl-reason').value.trim();
+      return runCmd(`kick ${who}${r ? ` -r ${q(r)}` : ''}`, `${selectedPlayer} expulsado`);
+    }
+    case 'ban': {
+      if (!await confirmDialog('Banear jugador',
+        `${selectedPlayer} no podrá volver a entrar hasta que lo desbanees.`, 'Banear')) return;
+      const r = $('#pl-reason').value.trim();
+      return runCmd(`banuser ${who}${r ? ` -r ${q(r)}` : ''}`, `${selectedPlayer} baneado`);
+    }
+    default:
+  }
+  return undefined;
+});
+
+$('#pl-msg-send').addEventListener('click', async () => {
+  const msg = $('#pl-msg').value.trim();
+  if (!msg) return toast('Escribe un mensaje', 'err');
+  if (await runCmd(`servermsg ${q(msg)}`, 'Mensaje enviado')) $('#pl-msg').value = '';
+  return undefined;
+});
+
+$('#pl-events').innerHTML = WORLD_EVENTS
+  .map(([c, n]) => `<button class="btn btn-ghost btn-sm" data-cmd="${esc(c)}">${esc(n)}</button>`).join('');
 
 /* =============================================================== mods === */
 

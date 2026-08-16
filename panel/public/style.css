@@ -340,6 +340,46 @@ em{ font-style:normal; color:var(--txt); }
 .tag button:hover{ color:var(--danger); }
 .empty{ color:var(--txt-mute); font-size:12.5px; padding:16px 0; text-align:center; }
 
+/* --------------------------------------------------------- jugadores --- */
+.pl-grid{
+  display:grid; grid-template-columns:minmax(230px, 300px) 1fr;
+  gap:14px; margin-bottom:14px; align-items:start;
+}
+@media (max-width:900px){ .pl-grid{ grid-template-columns:1fr; } }
+
+.pl-list{ display:grid; gap:6px; max-height:440px; overflow:auto; }
+.pl-item{
+  display:flex; align-items:center; gap:10px; width:100%; padding:10px 12px;
+  border:1px solid var(--line-soft); border-radius:var(--radius-sm);
+  background:var(--panel-2); color:var(--txt); font:inherit; font-size:13px;
+  cursor:pointer; text-align:left; transition:.14s;
+}
+.pl-item:hover{ border-color:#333d2c; background:#1c2318; }
+.pl-item.is-active{ border-color:var(--accent-dk); background:#1e2618; color:var(--accent); }
+.pl-dot{ width:7px; height:7px; border-radius:50%; background:var(--accent); flex:none; }
+
+.pl-block{ padding:14px 0; border-top:1px solid var(--line-soft); }
+.pl-block:first-child{ border-top:0; padding-top:0; }
+.pl-legend{
+  display:block; font-size:11.5px; color:var(--txt-mute); font-weight:600;
+  text-transform:uppercase; letter-spacing:.06em; margin-bottom:10px;
+}
+.pl-field{ display:block; }
+.pl-field > span{ display:block; font-size:12.5px; color:var(--txt-dim); margin-bottom:6px; font-weight:550; }
+.pl-row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.pl-row .set-input{ flex:1 1 150px; width:auto; }
+.pl-row .set-num{ flex:0 0 78px; width:78px; }
+.pl-row .btn{ flex:none; }
+.pl-hint{ font-size:11.5px; color:var(--txt-mute); margin:6px 0 0; }
+
+.pl-toggles{ display:flex; flex-wrap:wrap; gap:7px; }
+.pl-toggle{
+  display:inline-flex; align-items:center; gap:8px; padding:7px 12px;
+  border-radius:99px; border:1px solid var(--line); background:transparent;
+  color:var(--txt-dim); font:inherit; font-size:12.5px; cursor:pointer; transition:.14s;
+}
+.pl-toggle:hover{ color:var(--txt); border-color:#333d2c; background:var(--panel-2); }
+
 /* ------------------------------------------------------------ tablas --- */
 .table{ display:grid; gap:7px; }
 .trow{
