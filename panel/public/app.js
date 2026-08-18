@@ -1066,6 +1066,8 @@ function renderWorlds(d) {
         <div class="tmeta">${fmtBytes(b.size)} · ${fmtDate(b.mtime)}</div>
       </div>
       <div class="tactions">
+        <button class="btn btn-ok btn-sm" data-restore="${esc(b.name)}"
+                ${running ? 'disabled title="Apaga el servidor primero"' : ''}>Restaurar</button>
         <a class="btn btn-ghost btn-sm" href="/api/backups/${encodeURIComponent(b.name)}/download">Descargar</a>
         <button class="btn btn-danger btn-sm" data-del-backup="${esc(b.name)}">Borrar</button>
       </div>
@@ -1098,6 +1100,24 @@ $('#world-list').addEventListener('click', async (e) => {
 });
 
 $('#backup-list').addEventListener('click', async (e) => {
+  const r = e.target.closest('[data-restore]');
+  if (r) {
+    const name = r.dataset.restore;
+    if (!await confirmDialog('Restaurar esta copia',
+      `Se recuperará la partida tal y como estaba en "${name}". `
+      + 'El mundo actual no se borra: se guarda al lado con la fecha de hoy por si acaso.',
+      'Restaurar')) return;
+    r.disabled = true; r.textContent = 'Restaurando…';
+    try {
+      const res = await jpost(`/api/backups/${encodeURIComponent(name)}/restore`);
+      toast(res.movedTo
+        ? `Restaurado. El mundo anterior quedó como "${res.movedTo}".`
+        : `Mundo "${res.world}" restaurado.`, 'ok');
+    } catch (err) { toast(err.message, 'err'); }
+    loadWorlds();
+    return;
+  }
+
   const b = e.target.closest('[data-del-backup]');
   if (!b) return;
   if (!await confirmDialog('Borrar copia', `Se eliminará "${b.dataset.delBackup}".`, 'Borrar')) return;

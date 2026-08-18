@@ -261,6 +261,13 @@ app.get('/api/backups/:name/download', requireAuth, wrap(async (req, res) => {
   res.download(full, req.params.name);
 }));
 
+app.post('/api/backups/:name/restore', requireAuth, wrap(async (req, res) => {
+  const state = await pz.unitState();
+  const r = await worlds.restoreBackup(req.params.name, state === 'active');
+  broadcast({ type: 'event', text: `[panel] mundo "${r.world}" restaurado desde ${req.params.name}` });
+  ok(res, { ...r, worlds: await worlds.listWorlds() });
+}));
+
 app.delete('/api/backups/:name', requireAuth, wrap(async (req, res) => {
   await worlds.deleteBackup(req.params.name);
   ok(res, { backups: await worlds.listBackups() });

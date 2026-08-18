@@ -111,6 +111,57 @@ async function deleteBackup(name) {
   return true;
 }
 
+/**
+ * Restaura una copia sobre la carpeta de partidas.
+ *
+ * Nunca borra: si ya existe un mundo con ese nombre lo aparta con un sufijo
+ * antes de extraer, de modo que un restore equivocado siempre se puede
+ * deshacer a mano. Exige el servidor parado, igual que el borrado.
+ */
+async function restoreBackup(name, serverRunning) {
+  if (serverRunning) {
+    throw Object.assign(new Error('detén el servidor antes de restaurar'), { status: 409 });
+  }
+  const full = backupPath(name);
+  if (!await exists(full)) throw Object.assign(new Error('esa copia no existe'), { status: 404 });
+
+  // el nombre del mundo va dentro del propio .tar.gz, no lo adivinamos
+  const list = await run('tar', ['-tzf', full], { timeout: 120000 });
+  if (list.code !== 0) {
+    throw Object.assign(new Error('la copia no se puede leer, ¿está corrupta?'), { status: 500 });
+  }
+  const tops = [...new Set(
+    list.stdout.split('\n').map((l) => l.trim().split('/')[0]).filter(Boolean),
+  )];
+  if (tops.length !== 1 || !isSafeName(tops[0])) {
+    throw Object.assign(
+      new Error(`estructura inesperada dentro de la copia: ${tops.slice(0, 3).join(', ')}`),
+      { status: 400 },
+    );
+  }
+
+  const world = tops[0];
+  const dest = resolveInside(CFG.savesDir, world);
+  let movedTo = null;
+
+  if (await exists(dest)) {
+    movedTo = `${world}_antes-de-restaurar_${stamp()}`;
+    await fsp.rename(dest, resolveInside(CFG.savesDir, movedTo));
+  }
+
+  const r = await run('tar', ['-xzf', full, '-C', CFG.savesDir], { timeout: 900000 });
+  if (r.code !== 0) {
+    // deshacemos para no dejar al usuario sin mundo
+    await fsp.rm(dest, { recursive: true, force: true }).catch(() => {});
+    if (movedTo) await fsp.rename(resolveInside(CFG.savesDir, movedTo), dest).catch(() => {});
+    throw Object.assign(
+      new Error(r.stderr.trim().slice(0, 300) || 'fallo al extraer la copia'), { status: 500 },
+    );
+  }
+
+  return { world, movedTo };
+}
+
 /* -------------------------------------------------------- configuracion */
 
 const CONFIG_FILES = {
@@ -140,14 +191,57 @@ async function writeConfig(kind, text) {
   }
   const file = get();
   await fsp.mkdir(path.dirname(file), { recursive: true });
-  // copia de seguridad del anterior antes de sobrescribir
-  if (await exists(file)) await fsp.copyFile(file, `${file}.bak`).catch(() => {});
+
+  // Copia CON FECHA antes de sobrescribir. Con un unico .bak, varios guardados
+  // seguidos pisaban el historial y se perdia el estado original: exactamente
+  // lo que paso al desactivar mods de uno en uno.
+  if (await exists(file)) {
+    await fsp.copyFile(file, `${file}.${stamp()}.bak`).catch(() => {});
+    await pruneBaks(file);
+  }
+
   await fsp.writeFile(file, text, 'utf8');
   return file;
 }
 
+/** Conserva las 20 copias mas recientes de un fichero de configuracion. */
+async function pruneBaks(file, keep = 20) {
+  const dir = path.dirname(file);
+  const base = `${path.basename(file)}.`;
+  try {
+    const olds = (await fsp.readdir(dir))
+      .filter((n) => n.startsWith(base) && n.endsWith('.bak'))
+      .sort();
+    for (const n of olds.slice(0, Math.max(0, olds.length - keep))) {
+      await fsp.rm(path.join(dir, n), { force: true }).catch(() => {});
+    }
+  } catch { /* si no se puede listar, no pasa nada */ }
+}
+
+/** Copias con fecha de un fichero de configuracion, de mas nueva a mas vieja. */
+async function listConfigBaks(kind) {
+  const get = CONFIG_FILES[kind];
+  if (!get) throw Object.assign(new Error('fichero desconocido'), { status: 400 });
+  const file = get();
+  const dir = path.dirname(file);
+  const base = `${path.basename(file)}.`;
+
+  let names = [];
+  try {
+    names = (await fsp.readdir(dir)).filter((n) => n.startsWith(base) && n.endsWith('.bak'));
+  } catch { return []; }
+
+  const out = [];
+  for (const name of names) {
+    const st = await fsp.stat(path.join(dir, name)).catch(() => null);
+    if (st) out.push({ name, size: st.size, mtime: st.mtimeMs });
+  }
+  out.sort((a, b) => b.mtime - a.mtime);
+  return out;
+}
+
 module.exports = {
   listWorlds, deleteWorld,
-  backupWorld, listBackups, backupPath, deleteBackup,
-  readConfig, writeConfig,
+  backupWorld, listBackups, backupPath, deleteBackup, restoreBackup,
+  readConfig, writeConfig, listConfigBaks,
 };
