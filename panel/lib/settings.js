@@ -85,9 +85,16 @@ function applyIni(text, changes, opts = {}) {
     // un salto de linea partiria el fichero en dos ajustes distintos
     const value = String(rawVal == null ? '' : rawVal).replace(/[\r\n]+/g, ' ').trim();
 
-    const re = new RegExp(`^${key}=.*$`, 'm');
+    // 'gm' y funcion de reemplazo, por dos motivos distintos:
+    //  - 'g': parseIni lee la ULTIMA aparicion de una clave, asi que si el .ini
+    //    la tiene duplicada hay que escribirlas todas o el valor "no cambia".
+    //  - funcion: con una cadena, un valor que contenga $& o $' se interpreta
+    //    como referencia a la coincidencia y corrompe el fichero. Verificado:
+    //    Password=Cl4ve$&segura escribia Password=Cl4vePassword=viejasegura.
+    const re = new RegExp(`^${key}=.*$`, 'gm');
     if (re.test(out)) {
-      out = out.replace(re, `${key}=${value}`);
+      re.lastIndex = 0;            // test() con /g deja estado en lastIndex
+      out = out.replace(re, () => `${key}=${value}`);
       applied.push(key);
       continue;
     }

@@ -31,6 +31,12 @@ CFG.serverCfgDir = path.join(CFG.zomboidDir, 'Server');
 CFG.iniFile = path.join(CFG.serverCfgDir, `${CFG.serverName}.ini`);
 CFG.sandboxFile = path.join(CFG.serverCfgDir, `${CFG.serverName}_SandboxVars.lua`);
 
+// Cada papelera vive DENTRO del arbol de su origen para que apartar sea un
+// rename(2): atomico, instantaneo y sin riesgo de EXDEV. Ambos escaneres ya
+// ignoran las entradas que empiezan por punto.
+CFG.trashDir = path.join(CFG.savesDir, '.papelera');
+CFG.modsTrashDir = path.join(CFG.modsDir, '.papelera');
+
 /* -------------------------------------------------------------- ejecucion */
 
 /** execFile con promesa que NO rechaza: devuelve {code, stdout, stderr}. */
@@ -102,6 +108,40 @@ async function exists(p) {
   try { await fsp.access(p); return true; } catch { return false; }
 }
 
+/** Sello de fecha para nombres de copia: 20260818-224512 */
+function stamp() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`
+    + `-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
+/**
+ * Aparta `src` a la papelera en vez de borrarlo. Regla del proyecto: ninguna
+ * operacion destruye datos del usuario.
+ *
+ * Es un rename(2), o sea O(1) y atomico, porque la papelera esta en el mismo
+ * sistema de ficheros. Si aun asi diera EXDEV fallamos en vez de caer a `cp`:
+ * copiar duplicaria el disco justo cuando lo que falta es espacio.
+ */
+async function quarantine(src, trashRoot, reason) {
+  await fsp.mkdir(trashRoot, { recursive: true });
+  const name = `${path.basename(src)}__${reason}_${stamp()}`;
+  const dest = resolveInside(trashRoot, name);
+  try {
+    await fsp.rename(src, dest);
+  } catch (e) {
+    if (e.code === 'EXDEV') {
+      throw Object.assign(
+        new Error('la papelera esta en otro sistema de ficheros; no se aparta para no duplicar el disco'),
+        { status: 500 },
+      );
+    }
+    throw e;
+  }
+  return { name, dest };
+}
+
 async function dirSize(dir) {
   const r = await run('du', ['-sb', dir], { timeout: 60000 });
   const n = parseInt(r.stdout.trim().split(/\s+/)[0], 10);
@@ -129,7 +169,9 @@ function iniGetList(text, key) {
 function iniSetList(text, key, arr) {
   const line = `${key}=${arr.join(';')}`;
   const re = new RegExp(`^${key}=.*$`, 'm');
-  if (re.test(text)) return text.replace(re, line);
+  // funcion de reemplazo, no cadena: si no, un valor con $& o $' se
+  // interpreta como referencia a la coincidencia y corrompe el fichero
+  if (re.test(text)) return text.replace(re, () => line);
   return `${text.replace(/\s*$/, '')}\n${line}\n`;
 }
 
@@ -139,7 +181,7 @@ function iniGet(text, key) {
 }
 
 module.exports = {
-  CFG, run, sleep,
+  CFG, run, sleep, stamp, quarantine,
   verifyPassword,
   safeRelPath, isSafeName, resolveInside,
   exists, dirSize, fmtBytes,

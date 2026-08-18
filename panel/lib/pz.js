@@ -7,7 +7,10 @@ const path = require('path');
 const { CFG, run, sleep, exists, iniGet } = require('./util');
 
 const JAVA_PATTERN = 'zombie.network.GameServer';
-const ANSI_RE = /\[[0-9;?]*[A-Za-z]/g;
+// \x1b explicito: aqui habia un byte ESC literal, invisible en el
+// codigo y facil de perder al copiar o al pasar por cualquier herramienta
+// que sanee texto. El comportamiento es identico: lo que cambia es que se ve.
+const ANSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
 const RING_MAX = 1000;
 
 /* ------------------------------------------------------- estado del proceso */
@@ -100,6 +103,21 @@ class ConsoleTail {
     this.ring = [];
     this.timer = null;
     this.busy = false;
+    this.ino = null;          // para detectar rotacion aunque el log crezca
+    this.totalPushed = 0;     // contador monotono: sobrevive al recorte del ring
+  }
+
+  /**
+   * Numero de secuencia de la ultima linea vista. A diferencia de ring.length,
+   * no deja de crecer cuando el ring llega a su tope, asi que sirve como marca
+   * para "dame lo que ha salido desde este momento".
+   */
+  get seq() { return this.totalPushed; }
+
+  /** Lineas emitidas desde el numero de secuencia `from`. */
+  linesSince(from) {
+    const base = this.totalPushed - this.ring.length;   // seq de ring[0]
+    return this.ring.slice(Math.max(0, from - base));
   }
 
   async primeFromEnd(maxLines = 300) {
@@ -112,7 +130,9 @@ class ConsoleTail {
       await fh.close();
       const lines = this._clean(buf.toString('utf8')).split('\n').filter(Boolean);
       this.ring = lines.slice(-maxLines);
+      this.totalPushed = this.ring.length;
       this.offset = st.size;
+      this.ino = st.ino;
     } catch {
       this.offset = 0;
     }
@@ -127,23 +147,32 @@ class ConsoleTail {
     this.busy = true;
     try {
       const st = await fsp.stat(this.file);
-      if (st.size < this.offset) { this.offset = 0; this.carry = ''; }
+      // Comparar solo el tamaño no basta: pz-start.sh rota con mv + ': >', o sea
+      // inodo nuevo. En un bucle de reinicio el log nuevo supera enseguida al
+      // viejo y se perderian justo las primeras lineas, que son las del error.
+      if (st.ino !== this.ino || st.size < this.offset) {
+        this.offset = 0;
+        this.carry = '';
+      }
+      this.ino = st.ino;
       if (st.size === this.offset) return;
 
       const len = Math.min(st.size - this.offset, 512 * 1024);
       const fh = await fsp.open(this.file, 'r');
       const buf = Buffer.alloc(len);
-      await fh.read(buf, 0, len, this.offset);
+      const { bytesRead } = await fh.read(buf, 0, len, this.offset);
       await fh.close();
-      this.offset += len;
+      if (!bytesRead) return;                 // avanzar con `len` metia NUL en el carry
+      this.offset += bytesRead;
 
-      const chunk = this.carry + this._clean(buf.toString('utf8'));
+      const chunk = this.carry + this._clean(buf.subarray(0, bytesRead).toString('utf8'));
       const parts = chunk.split('\n');
       this.carry = parts.pop();               // ultima linea posiblemente incompleta
       const lines = parts.filter((l) => l.length > 0);
       if (!lines.length) return;
 
       this.ring.push(...lines);
+      this.totalPushed += lines.length;
       if (this.ring.length > RING_MAX) this.ring.splice(0, this.ring.length - RING_MAX);
       this.onLines(lines);
     } catch {
@@ -191,31 +220,56 @@ async function power(action) {
 }
 
 /**
+ * Envia un comando y devuelve las lineas que el servidor escribio DESPUES.
+ *
+ * El cerrojo es necesario: dos capturas simultaneas se roban la respuesta la
+ * una a la otra, y el panel lanza `players` cada 45 s ademas de bajo demanda.
+ */
+let capturing = false;
+
+async function captureAfterCommand(tailer, cmd, { timeoutMs = 8000, done } = {}) {
+  if (capturing) {
+    throw Object.assign(new Error('ya hay una consulta en curso, reintenta'), { status: 409 });
+  }
+  capturing = true;
+  try {
+    const from = tailer.seq;
+    await sendCommand(cmd);
+    const until = Date.now() + timeoutMs;
+    while (Date.now() < until) {
+      await sleep(300);
+      await tailer.poll();
+      const lines = tailer.linesSince(from);
+      if (done && done(lines)) return { lines, complete: true };
+    }
+    return { lines: tailer.linesSince(from), complete: false };
+  } finally {
+    capturing = false;
+  }
+}
+
+const RE_PLAYERS = /Players connected \((\d+)\)/i;
+
+/**
  * Lista de jugadores conectados. Se pide al propio servidor con el comando
  * `players` y se lee su respuesta del log; es la unica fuente fiable.
  */
 async function queryPlayers(tailer) {
-  const before = tailer.ring.length;
-  await sendCommand('players');
+  const { lines } = await captureAfterCommand(tailer, 'players', {
+    done: (ls) => ls.some((l) => RE_PLAYERS.test(l)),
+  });
 
-  for (let i = 0; i < 10; i++) {
-    await sleep(300);
-    await tailer.poll();
-    const fresh = tailer.ring.slice(Math.max(0, before - 5));
-    const joined = fresh.join('\n');
-    const m = /Players connected \((\d+)\)/i.exec(joined);
-    if (!m) continue;
+  const idx = lines.findIndex((l) => RE_PLAYERS.test(l));
+  if (idx < 0) return { count: null, names: [] };
 
-    const after = joined.slice(m.index + m[0].length);
-    const names = [];
-    for (const raw of after.split('\n').slice(1)) {
-      const line = raw.trim();
-      if (!line.startsWith('-')) break;
-      names.push(line.replace(/^-\s*/, ''));
-    }
-    return { count: parseInt(m[1], 10) || 0, names };
+  const count = parseInt(RE_PLAYERS.exec(lines[idx])[1], 10) || 0;
+  const names = [];
+  for (const raw of lines.slice(idx + 1)) {
+    const line = raw.trim();
+    if (!line.startsWith('-')) break;
+    names.push(line.replace(/^-\s*/, ''));
   }
-  return { count: null, names: [] };
+  return { count, names };
 }
 
 /* ----------------------------------------------------------------- estado */
@@ -240,6 +294,6 @@ async function fullStatus(tailer) {
 }
 
 module.exports = {
-  ConsoleTail, sendCommand, power, queryPlayers,
+  ConsoleTail, sendCommand, power, queryPlayers, captureAfterCommand,
   fullStatus, unitState, javaPid, hostStats, endpoint,
 };
