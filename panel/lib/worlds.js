@@ -64,6 +64,22 @@ function stamp() {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
+/** Ficheros de configuracion que acompañan al mundo dentro de la copia. */
+function configFileNames() {
+  return [
+    path.basename(CFG.iniFile),
+    path.basename(CFG.sandboxFile),
+  ];
+}
+
+/**
+ * Empaqueta el mundo Y su configuracion.
+ *
+ * Guardar solo la partida deja media copia: la lista de mods vive en el .ini,
+ * y sin ella un mundo restaurado arranca sin los mods con los que se genero.
+ * El .ini y el SandboxVars van sueltos en la raiz del archivo, junto a la
+ * carpeta del mundo.
+ */
 async function backupWorld(name) {
   if (!isSafeName(name)) throw Object.assign(new Error('nombre invalido'), { status: 400 });
   const src = resolveInside(CFG.savesDir, name);
@@ -73,13 +89,24 @@ async function backupWorld(name) {
   const file = `${name.replace(/[^\w.\-]/g, '_')}_${stamp()}.tar.gz`;
   const dest = path.join(CFG.backupDir, file);
 
-  const r = await run('tar', ['-czf', dest, '-C', CFG.savesDir, name], { timeout: 900000 });
+  // rutas absolutas a proposito: en tar cada -C se interpreta relativo al
+  // anterior, y con rutas relativas el segundo apuntaria dentro del primero
+  const args = ['-czf', dest, '-C', path.resolve(CFG.savesDir), name];
+  const included = [];
+  for (const cfg of configFileNames()) {
+    if (await exists(path.join(CFG.serverCfgDir, cfg))) {
+      args.push('-C', path.resolve(CFG.serverCfgDir), cfg);
+      included.push(cfg);
+    }
+  }
+
+  const r = await run('tar', args, { timeout: 900000 });
   if (r.code !== 0) {
     await fsp.rm(dest, { force: true }).catch(() => {});
     throw Object.assign(new Error(r.stderr.trim().slice(0, 300) || 'fallo al crear el backup'), { status: 500 });
   }
   const st = await fsp.stat(dest);
-  return { file, size: st.size };
+  return { file, size: st.size, config: included };
 }
 
 async function listBackups() {
@@ -125,22 +152,28 @@ async function restoreBackup(name, serverRunning) {
   const full = backupPath(name);
   if (!await exists(full)) throw Object.assign(new Error('esa copia no existe'), { status: 404 });
 
-  // el nombre del mundo va dentro del propio .tar.gz, no lo adivinamos
+  // el contenido va dentro del propio .tar.gz, no lo adivinamos
   const list = await run('tar', ['-tzf', full], { timeout: 120000 });
   if (list.code !== 0) {
     throw Object.assign(new Error('la copia no se puede leer, ¿está corrupta?'), { status: 500 });
   }
-  const tops = [...new Set(
-    list.stdout.split('\n').map((l) => l.trim().split('/')[0]).filter(Boolean),
-  )];
-  if (tops.length !== 1 || !isSafeName(tops[0])) {
+
+  const entries = list.stdout.split('\n').map((l) => l.trim()).filter(Boolean);
+  const tops = [...new Set(entries.map((e) => e.split('/')[0]))];
+  // lo que tiene hijos es la carpeta del mundo; lo suelto, la configuracion
+  const dirs = tops.filter((t) => entries.some((e) => e.startsWith(`${t}/`)));
+  const loose = tops.filter((t) => !dirs.includes(t));
+
+  if (dirs.length !== 1 || !isSafeName(dirs[0])) {
     throw Object.assign(
       new Error(`estructura inesperada dentro de la copia: ${tops.slice(0, 3).join(', ')}`),
       { status: 400 },
     );
   }
+  const known = configFileNames();
+  const configs = loose.filter((f) => known.includes(f));
 
-  const world = tops[0];
+  const world = dirs[0];
   const dest = resolveInside(CFG.savesDir, world);
   let movedTo = null;
 
@@ -149,7 +182,7 @@ async function restoreBackup(name, serverRunning) {
     await fsp.rename(dest, resolveInside(CFG.savesDir, movedTo));
   }
 
-  const r = await run('tar', ['-xzf', full, '-C', CFG.savesDir], { timeout: 900000 });
+  const r = await run('tar', ['-xzf', full, '-C', path.resolve(CFG.savesDir), world], { timeout: 900000 });
   if (r.code !== 0) {
     // deshacemos para no dejar al usuario sin mundo
     await fsp.rm(dest, { recursive: true, force: true }).catch(() => {});
@@ -159,7 +192,20 @@ async function restoreBackup(name, serverRunning) {
     );
   }
 
-  return { world, movedTo };
+  // La configuracion se restaura con el mundo: es lo que devuelve el servidor
+  // al estado exacto de la copia, incluida la lista de mods. La actual se
+  // guarda con fecha antes de sobrescribir, asi que hay marcha atras.
+  const restoredConfig = [];
+  for (const cfg of configs) {
+    const target = resolveInside(CFG.serverCfgDir, cfg);
+    if (await exists(target)) {
+      await fsp.copyFile(target, `${target}.${stamp()}.bak`).catch(() => {});
+    }
+    const rc = await run('tar', ['-xzf', full, '-C', path.resolve(CFG.serverCfgDir), cfg], { timeout: 120000 });
+    if (rc.code === 0) restoredConfig.push(cfg);
+  }
+
+  return { world, movedTo, config: restoredConfig };
 }
 
 /* -------------------------------------------------------- configuracion */

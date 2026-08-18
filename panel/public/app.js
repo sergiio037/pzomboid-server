@@ -1104,8 +1104,9 @@ $('#backup-list').addEventListener('click', async (e) => {
   if (r) {
     const name = r.dataset.restore;
     if (!await confirmDialog('Restaurar esta copia',
-      `Se recuperará la partida tal y como estaba en "${name}". `
-      + 'El mundo actual no se borra: se guarda al lado con la fecha de hoy por si acaso.',
+      `Se recuperará la partida y su configuración (incluida la lista de mods) tal y como `
+      + `estaban en "${name}". Nada se borra: el mundo actual se guarda al lado con la fecha `
+      + 'de hoy, y del .ini se deja una copia fechada.',
       'Restaurar')) return;
     r.disabled = true; r.textContent = 'Restaurando…';
     try {
@@ -1113,6 +1114,7 @@ $('#backup-list').addEventListener('click', async (e) => {
       toast(res.movedTo
         ? `Restaurado. El mundo anterior quedó como "${res.movedTo}".`
         : `Mundo "${res.world}" restaurado.`, 'ok');
+      if (res.config?.length) toast(`Configuración restaurada: ${res.config.join(', ')}`, 'ok');
     } catch (err) { toast(err.message, 'err'); }
     loadWorlds();
     return;
