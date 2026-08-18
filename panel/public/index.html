@@ -265,16 +265,16 @@
             <div class="card-head"><h3>Workshop</h3></div>
             <p class="hint">IDs del Workshop de Steam. El servidor los descarga solo al arrancar; después activa su <em>Mod ID</em> en la lista de la izquierda o abajo.</p>
             <form class="inline-form" id="ws-form">
-              <input id="ws-id" type="text" inputmode="numeric" placeholder="ID del Workshop (ej. 2392709985)">
-              <button class="btn btn-primary btn-sm" type="submit">Añadir</button>
+              <input id="ws-id" type="text" inputmode="numeric" disabled placeholder="ID del Workshop (ej. 2392709985)">
+              <button class="btn btn-primary btn-sm" type="submit" disabled>Añadir</button>
             </form>
             <div class="tag-list" id="ws-list"></div>
 
             <div class="card-head" style="margin-top:22px"><h3>Mod IDs activos</h3></div>
             <p class="hint">Contenido de <code>Mods=</code> en el .ini. Puedes añadir a mano el ID de un mod del Workshop.</p>
             <form class="inline-form" id="modid-form">
-              <input id="modid-input" type="text" placeholder="Mod ID (ej. Brita_2)">
-              <button class="btn btn-primary btn-sm" type="submit">Añadir</button>
+              <input id="modid-input" type="text" disabled placeholder="Mod ID (ej. Brita_2)">
+              <button class="btn btn-primary btn-sm" type="submit" disabled>Añadir</button>
             </form>
             <div class="tag-list" id="modid-list"></div>
           </div>

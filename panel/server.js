@@ -19,7 +19,11 @@ const sandbox = require('./lib/sandbox');
 
 const app = express();
 app.disable('x-powered-by');
-app.set('trust proxy', 1);
+// SIN proxy delante (install.sh no instala ninguno y node escucha en 0.0.0.0).
+// Con 'trust proxy' activo, req.ip salia de X-Forwarded-For, que controla el
+// cliente: rotando la cabecera el limitador de login no bloqueaba nunca.
+// Poner 'loopback' SOLO si algun dia se pone Caddy o nginx por delante.
+app.set('trust proxy', false);
 app.use(express.json({ limit: '4mb' }));
 app.use(express.urlencoded({ extended: false, limit: '1mb' }));
 
@@ -45,9 +49,31 @@ function requireAuth(req, res, next) {
   return res.status(401).json({ error: 'no autenticado' });
 }
 
-// Rate limit sencillo del login: 8 intentos por IP cada 5 minutos.
+/* Rate limit del login: 8 intentos por IP cada 5 minutos, mas un techo global.
+ *
+ * El techo global existe porque el limite por IP solo sirve si la IP es de
+ * fiar, y ademas evita que un aluvion de intentos monopolice el event loop
+ * ejecutando scrypt. El Map se poda: antes crecia sin limite. */
 const attempts = new Map();
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of attempts) {
+    if (v.until < now && now - (v.ts || 0) > 10 * 60 * 1000) attempts.delete(k);
+  }
+}, 60000).unref?.();
+
+let globalFails = 0;
+let globalWindow = Date.now();
+
+function globalAllowed() {
+  if (Date.now() - globalWindow > 5 * 60 * 1000) { globalWindow = Date.now(); globalFails = 0; }
+  globalFails += 1;
+  return globalFails <= 100;
+}
+
 function loginAllowed(ip) {
+  if (!globalAllowed()) return false;
   const now = Date.now();
   const rec = attempts.get(ip) || { n: 0, until: 0 };
   if (rec.until > now) return false;
@@ -74,6 +100,12 @@ function broadcast(payload) {
 const tailer = new pz.ConsoleTail(CFG.consoleLog, (lines) => broadcast({ type: 'log', lines }));
 
 server.on('upgrade', (req, socket, head) => {
+  // ANTES de sessionMw: node retira su propio manejador de 'error' del socket
+  // al emitir 'upgrade', y sessionMw responde de forma asincrona. Un RST del
+  // cliente en ese hueco era una excepcion no capturada que mataba el panel,
+  // y no hacia falta estar autenticado para provocarla.
+  socket.on('error', () => socket.destroy());
+
   sessionMw(req, {}, () => {
     if (!req.session || !req.session.auth) { socket.destroy(); return; }
     wss.handleUpgrade(req, socket, head, (ws) => {
@@ -82,6 +114,30 @@ server.on('upgrade', (req, socket, head) => {
     });
   });
 });
+
+wss.on('connection', (ws) => {
+  ws.isAlive = true;
+  // ws emite 'error' sobre la instancia ante fallos de protocolo; sin listener
+  // es igualmente una excepcion no capturada.
+  ws.on('error', (e) => console.error('[ws]', e.message));
+  ws.on('pong', () => { ws.isAlive = true; });
+});
+
+// Un cliente que desaparece sin cerrar (portatil que se suspende, wifi que
+// cae) deja el socket abierto para siempre y broadcast le sigue escribiendo.
+const heartbeat = setInterval(() => {
+  for (const ws of wss.clients) {
+    if (ws.isAlive === false) { ws.terminate(); continue; }
+    ws.isAlive = false;
+    try { ws.ping(); } catch { /* se limpia en la vuelta siguiente */ }
+  }
+}, 30000);
+heartbeat.unref?.();
+
+// Red de seguridad: con Restart=always systemd relanzaria, pero perder las
+// sesiones y cortar un tar en vuelo por un error suelto no compensa.
+process.on('uncaughtException', (e) => console.error('[panel] excepcion no capturada', e));
+process.on('unhandledRejection', (e) => console.error('[panel] promesa rechazada', e));
 
 /* ------------------------------------------------------------ helper API */
 
@@ -108,7 +164,11 @@ app.post('/api/login', wrap(async (req, res) => {
   // comparamos hashes: longitud fija, asi timingSafeEqual nunca lanza
   const sha = (s) => crypto.createHash('sha256').update(String(s == null ? '' : s), 'utf8').digest();
   const userOk = crypto.timingSafeEqual(sha(user), sha(CFG.user));
-  if (!userOk || !verifyPassword(pass)) {
+  // Sin cortocircuito: con `!userOk || !verifyPassword(...)` scrypt solo corria
+  // al acertar el usuario, y esos ~70 ms de diferencia lo delataban. Ahora se
+  // evalua siempre, que es asumible porque el techo global acota los intentos.
+  const passOk = verifyPassword(pass);
+  if (!userOk || !passOk) {
     return res.status(401).json({ error: 'usuario o contraseña incorrectos' });
   }
   req.session.auth = true;
@@ -139,10 +199,27 @@ app.post('/api/power', requireAuth, wrap(async (req, res) => {
   ok(res, { action });
 }));
 
+/* Cerrojo: dos pestañas o un doble clic lanzaban dos pz-update.sh sobre el
+ * mismo +force_install_dir. Y el timeout de 30 min mataba el bash dejando el
+ * steamcmd huerfano y saltandose el systemctl start final: 4 GB en una VM
+ * modesta pasan de media hora sin dificultad. */
+let updating = null;
+
 app.post('/api/update', requireAuth, wrap(async (req, res) => {
+  if (updating) {
+    throw Object.assign(new Error('ya hay una actualizacion en curso'), { status: 409 });
+  }
   broadcast({ type: 'event', text: '[panel] actualizando servidor via SteamCMD, esto tarda...' });
-  const r = await run(path.join(CFG.binDir, 'pz-update.sh'), [], { timeout: 1800000 });
-  if (r.code !== 0) throw Object.assign(new Error('la actualizacion fallo, revisa los logs'), { status: 500 });
+
+  updating = (async () => {
+    const r = await run(path.join(CFG.binDir, 'pz-update.sh'), [], { timeout: 3 * 3600 * 1000 });
+    if (r.code !== 0) {
+      throw Object.assign(new Error('la actualizacion fallo, revisa la consola'), { status: 500 });
+    }
+    return r;
+  })().finally(() => { updating = null; });
+
+  const r = await updating;
   ok(res, { output: r.stdout.slice(-4000) });
 }));
 
@@ -246,9 +323,9 @@ app.get('/api/worlds', requireAuth, wrap(async (req, res) => {
 
 app.delete('/api/worlds/:name', requireAuth, wrap(async (req, res) => {
   const state = await pz.unitState();
-  await worlds.deleteWorld(req.params.name, state === 'active');
-  broadcast({ type: 'event', text: `[panel] mundo "${req.params.name}" borrado` });
-  ok(res, { worlds: await worlds.listWorlds() });
+  const r = await worlds.deleteWorld(req.params.name, state === 'active');
+  broadcast({ type: 'event', text: `[panel] mundo "${req.params.name}" apartado a la papelera` });
+  ok(res, { ...r, worlds: await worlds.listWorlds() });
 }));
 
 app.post('/api/worlds/:name/backup', requireAuth, wrap(async (req, res) => {
@@ -358,16 +435,38 @@ app.use((err, req, res, next) => {
 
 /* ----------------------------------------------------------------- boot */
 
+server.on('error', (e) => {
+  console.error(`[panel] no se pudo escuchar en :${CFG.port} —`, e.code || e.message);
+  process.exit(1);
+});
+
 (async () => {
   await fsp.mkdir(CFG.tmpDir, { recursive: true }).catch(() => {});
+
+  // Un tar cortado por un reinicio del panel dejaba un .tar.gz a medias que
+  // listBackups mostraba como copia valida.
+  const barridos = await worlds.sweepPartials();
+  if (barridos) console.log(`[panel] ${barridos} copia(s) a medias descartadas`);
+
   await tailer.primeFromEnd(400);
   tailer.start(600);
 
   server.listen(CFG.port, '0.0.0.0', () => {
     console.log(`[panel] escuchando en :${CFG.port}  (unidad ${CFG.unit}, mundo ${CFG.serverName})`);
   });
-})();
+})().catch((e) => {
+  console.error('[panel] fallo al arrancar', e);
+  process.exit(1);
+});
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
-  process.on(sig, () => { server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 3000); });
+  process.on(sig, () => {
+    // Los sockets ascendidos cuentan como conexiones abiertas: sin cerrarlos,
+    // server.close() no completaba nunca y siempre se acababa en el exit duro,
+    // que puede cortar un tar en vuelo.
+    for (const c of wss.clients) { try { c.close(1001); } catch { /* ya muerto */ } }
+    wss.close();
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 3000);
+  });
 }

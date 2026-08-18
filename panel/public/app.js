@@ -90,8 +90,15 @@ function confirmDialog(title, text, okLabel = 'Confirmar') {
 function showLogin() {
   $('#app').classList.add('hidden');
   $('#login').classList.remove('hidden');
-  if (ws) { try { ws.close(); } catch {} ws = null; }
+  if (ws) { try { ws.close(); } catch { /* ya cerrado */ } ws = null; }
+  // Sin limpiar estos dos, cada caducidad de sesion dejaba un WebSocket
+  // reconectandose y un ciclo de jugadores extra corriendo en paralelo.
+  clearTimeout(wsRetry); wsRetry = null;
   clearInterval(statusTimer); statusTimer = null;
+  clearInterval(playersTimer); playersTimer = null;
+  // Un dialogo abierto al caducar la sesion tapaba el login: position fixed
+  // con z-index 70, por encima de todo.
+  $('#modal').classList.add('hidden');
 }
 
 function showApp() {
@@ -276,29 +283,41 @@ async function refreshPlayers() {
     $('#ov-players').textContent = players.count;
     $('#ov-players-names').textContent = players.names.length
       ? players.names.join(', ') : 'nadie conectado';
-  } catch { /* el servidor puede estar cargando el mapa */ }
+  } catch (e) {
+    // 409 = ya hay otra consulta en curso; no es un fallo, se reintenta sola
+    // en el siguiente ciclo. El resto se ignora: el servidor puede estar
+    // todavia cargando el mapa.
+    if (!/en curso/i.test(e.message || '')) { /* silencio deliberado */ }
+  }
 }
 
-$$('[data-power]').forEach((btn) => {
-  btn.addEventListener('click', async () => {
-    const action = btn.dataset.power;
-    const labels = { start: 'Encender', restart: 'Reiniciar', stop: 'Apagar' };
-    if (action !== 'start') {
-      const okGo = await confirmDialog(
-        `${labels[action]} el servidor`,
-        'Se guardará la partida y se expulsará a los jugadores conectados.',
-        labels[action],
-      );
-      if (!okGo) return;
-    }
-    $$('[data-power]').forEach((b) => { b.disabled = true; });
-    toast(`${labels[action]}…`, 'warn');
-    try {
-      await jpost('/api/power', { action });
-      toast('Hecho', 'ok');
-    } catch (e) { toast(e.message, 'err'); }
-    setTimeout(refreshStatus, 1200);
-  });
+const POWER_LABELS = { start: 'Encender', restart: 'Reiniciar', stop: 'Apagar' };
+
+async function doPower(action) {
+  if (!POWER_LABELS[action]) return;
+  if (action !== 'start') {
+    const okGo = await confirmDialog(
+      `${POWER_LABELS[action]} el servidor`,
+      'Se guardará la partida y se expulsará a los jugadores conectados.',
+      POWER_LABELS[action],
+    );
+    if (!okGo) return;
+  }
+  $$('[data-power]').forEach((b) => { b.disabled = true; });
+  toast(`${POWER_LABELS[action]}…`, 'warn');
+  try {
+    await jpost('/api/power', { action });
+    toast('Hecho', 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+  setTimeout(refreshStatus, 1200);
+}
+
+// Delegado en document: los botones [data-power] que pinta renderModIssues con
+// innerHTML son posteriores al arranque, asi que un forEach inicial no los
+// alcanzaba y el boton "Reiniciar" del aviso de mods no hacia nada.
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-power]');
+  if (b && !b.disabled) doPower(b.dataset.power);
 });
 
 $('#btn-update').addEventListener('click', async () => {
@@ -315,6 +334,8 @@ $('#btn-update').addEventListener('click', async () => {
 /* ============================================================ consola === */
 
 let ws = null;
+let wsRetry = null;      // reconexion pendiente
+let playersTimer = null; // ciclo de refresco de jugadores
 const CMD_HISTORY = [];
 let histIdx = -1;
 
@@ -364,6 +385,7 @@ function pushLines(lines) {
 }
 
 function connectWs() {
+  if (ws) { try { ws.close(); } catch { /* ya cerrado */ } ws = null; }
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}/`);
 
@@ -380,7 +402,15 @@ function connectWs() {
       pushLines([msg.text]);
     }
   };
-  ws.onclose = () => { ws = null; setTimeout(() => { if (!$('#app').classList.contains('hidden')) connectWs(); }, 3000); };
+  ws.onclose = function onClose() {
+    // Un onclose tardio de un socket ya sustituido no debe reconectar nada.
+    if (this !== ws) return;
+    ws = null;
+    clearTimeout(wsRetry);
+    wsRetry = setTimeout(() => {
+      if (!$('#app').classList.contains('hidden')) connectWs();
+    }, 3000);
+  };
   ws.onerror = () => { try { ws.close(); } catch {} };
 }
 
@@ -773,9 +803,31 @@ $('#pl-events').innerHTML = WORLD_EVENTS
 
 const ICON_TRASH = `<svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/></svg>`;
 
+/**
+ * Estado de la lista de mods. Antes vivia en window.__mods y solo se asignaba
+ * dentro de renderMods; como goto() activa la vista ANTES de que /api/mods
+ * conteste, y los formularios salian habilitados, mandar un ID en ese hueco
+ * enviaba `ids: [ese_unico_id]` y el backend REEMPLAZA la lista entera.
+ * Un clic rapido borraba todos los mods del .ini.
+ */
+let modsState = null;
+
+function setModsFormsEnabled(on) {
+  ['#ws-form', '#modid-form'].forEach((sel) => {
+    $$(`${sel} input, ${sel} button`).forEach((el) => { el.disabled = !on; });
+  });
+}
+
 async function loadMods() {
-  try { renderMods(await api('/api/mods')); }
-  catch (e) { toast(e.message, 'err'); }
+  setModsFormsEnabled(false);
+  try {
+    modsState = await api('/api/mods');
+    renderMods(modsState);
+    setModsFormsEnabled(true);
+  } catch (e) {
+    modsState = null;                       // los formularios siguen bloqueados
+    toast(`${e.message} — no se puede editar la lista de mods hasta recargar`, 'err');
+  }
 }
 
 function renderModIssues(d) {
@@ -861,18 +913,19 @@ function renderMods(data) {
     <span class="tag">${esc(id)}<button data-del-modid="${esc(id)}" title="Quitar">×</button></span>`).join('')
     : '<p class="empty">Ningún mod activo.</p>';
 
-  window.__mods = data;
+  modsState = data;
 }
 
 $('#mods-refresh').addEventListener('click', loadMods);
 
 $('#mod-issues').addEventListener('click', async (e) => {
   if (!e.target.closest('#mods-enable-all')) return;
-  const add = (window.__mods?.inactiveIds || []).map((x) => x.id);
+  if (!modsState) return toast('todavia no se ha cargado la lista de mods', 'err');
+  const add = modsState.inactiveIds.map((x) => x.id);
   if (!add.length) return;
   try {
     renderMods(await jpost('/api/mods/enabled', {
-      ids: [...(window.__mods?.enabledIds || []), ...add],
+      ids: [...modsState.enabledIds, ...add],
     }));
     toast(`${add.length} mod(s) activados. Reinicia para aplicarlo.`, 'ok');
   } catch (err) { toast(err.message, 'err'); }
@@ -901,7 +954,10 @@ $('#ws-form').addEventListener('submit', async (e) => {
   const input = $('#ws-id');
   const id = input.value.trim();
   if (!/^\d{4,12}$/.test(id)) return toast('El ID del Workshop debe ser numérico', 'err');
-  const ids = [...(window.__mods?.workshop || []), id];
+  // Sin lista cargada NO se envia nada: el backend reemplaza la lista
+  // completa, asi que mandar un solo id la vaciaria.
+  if (!modsState) return toast('todavia no se ha cargado la lista de mods', 'err');
+  const ids = [...modsState.workshop, id];
   try { renderMods(await jpost('/api/mods/workshop', { ids })); input.value = ''; toast('Añadido', 'ok'); }
   catch (err) { toast(err.message, 'err'); }
 });
@@ -909,7 +965,10 @@ $('#ws-form').addEventListener('submit', async (e) => {
 $('#ws-list').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-del-ws]');
   if (!b) return;
-  const ids = (window.__mods?.workshop || []).filter((x) => x !== b.dataset.delWs);
+  // Sin lista cargada NO se envia nada: el backend reemplaza la lista
+  // completa, asi que mandar un solo id la vaciaria.
+  if (!modsState) return toast('todavia no se ha cargado la lista de mods', 'err');
+  const ids = modsState.workshop.filter((x) => x !== b.dataset.delWs);
   try { renderMods(await jpost('/api/mods/workshop', { ids })); }
   catch (err) { toast(err.message, 'err'); }
 });
@@ -919,7 +978,10 @@ $('#modid-form').addEventListener('submit', async (e) => {
   const input = $('#modid-input');
   const id = input.value.trim();
   if (!id) return;
-  const ids = [...(window.__mods?.enabledIds || []), id];
+  // Sin lista cargada NO se envia nada: el backend reemplaza la lista
+  // completa, asi que mandar un solo id la vaciaria.
+  if (!modsState) return toast('todavia no se ha cargado la lista de mods', 'err');
+  const ids = [...modsState.enabledIds, id];
   try { renderMods(await jpost('/api/mods/enabled', { ids })); input.value = ''; toast('Añadido', 'ok'); }
   catch (err) { toast(err.message, 'err'); }
 });
@@ -927,7 +989,10 @@ $('#modid-form').addEventListener('submit', async (e) => {
 $('#modid-list').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-del-modid]');
   if (!b) return;
-  const ids = (window.__mods?.enabledIds || []).filter((x) => x !== b.dataset.delModid);
+  // Sin lista cargada NO se envia nada: el backend reemplaza la lista
+  // completa, asi que mandar un solo id la vaciaria.
+  if (!modsState) return toast('todavia no se ha cargado la lista de mods', 'err');
+  const ids = modsState.enabledIds.filter((x) => x !== b.dataset.delModid);
   try { renderMods(await jpost('/api/mods/enabled', { ids })); }
   catch (err) { toast(err.message, 'err'); }
 });
@@ -1083,6 +1148,7 @@ $('#world-list').addEventListener('click', async (e) => {
     try {
       const r = await jpost(`/api/worlds/${encodeURIComponent(bk.dataset.backup)}/backup`);
       toast(`Backup creado (${fmtBytes(r.backup.size)})`, 'ok');
+      if (r.backup.warning) toast(r.backup.warning, 'warn');
     } catch (err) { toast(err.message, 'err'); }
     loadWorlds();
     return;
@@ -1091,11 +1157,14 @@ $('#world-list').addEventListener('click', async (e) => {
   const del = e.target.closest('[data-del-world]');
   if (!del) return;
   const name = del.dataset.delWorld;
-  if (!await confirmDialog('Borrar mundo',
-    `Se eliminará la partida "${name}" de forma permanente. Haz un backup antes si tienes dudas.`,
-    'Borrar para siempre')) return;
-  try { await jdel(`/api/worlds/${encodeURIComponent(name)}`); toast('Mundo borrado', 'ok'); }
-  catch (err) { toast(err.message, 'err'); }
+  if (!await confirmDialog('Apartar mundo',
+    `La partida "${name}" se moverá a la papelera, dentro de la propia carpeta de `
+    + 'partidas. No se borra: podrás recuperarla a mano desde ahí.',
+    'Apartar')) return;
+  try {
+    const r = await jdel(`/api/worlds/${encodeURIComponent(name)}`);
+    toast(`Apartado como "${r.quarantined}"`, 'ok');
+  } catch (err) { toast(err.message, 'err'); }
   loadWorlds();
 });
 
@@ -1115,6 +1184,7 @@ $('#backup-list').addEventListener('click', async (e) => {
         ? `Restaurado. El mundo anterior quedó como "${res.movedTo}".`
         : `Mundo "${res.world}" restaurado.`, 'ok');
       if (res.config?.length) toast(`Configuración restaurada: ${res.config.join(', ')}`, 'ok');
+      if (res.configFailed) toast(`La configuración NO se restauró: ${res.configFailed}`, 'err');
     } catch (err) { toast(err.message, 'err'); }
     loadWorlds();
     return;
@@ -1350,7 +1420,14 @@ function settingRow(it, raw, missing) {
     control = `<label class="switch"><input type="checkbox" ${attrs} ${on ? 'checked' : ''}><i></i></label>`;
 
   } else if (it.type === 'select') {
-    control = `<select class="set-input" ${attrs}>${it.options.map((o) => `
+      // Si el valor guardado no esta entre las opciones, el navegador
+      // seleccionaria la primera, refreshDirty lo marcaria como cambio y
+      // Guardar quedaria habilitado sin que el usuario tocara nada: un
+      // clic y el valor real se pierde. Se añade como opcion propia.
+    const conocido = it.options.some((o) => val === String(o.v));
+    const extra = conocido ? ''
+      : `<option value="${esc(val)}" selected>${esc(val)} · (valor actual, no listado)</option>`;
+    control = `<select class="set-input" ${attrs}>${extra}${it.options.map((o) => `
       <option value="${esc(o.v)}"${val === String(o.v) ? ' selected' : ''}>${esc(o.label)}</option>`).join('')}
     </select>`;
 
@@ -1468,7 +1545,14 @@ function sandboxRow(it) {
     control = `<label class="switch"><input type="checkbox" ${attrs} ${it.value ? 'checked' : ''}><i></i></label>`;
 
   } else if (it.options && it.options.length) {
-    control = `<select class="set-input" ${attrs}>${it.options.map((o) => `
+      // Si el valor guardado no esta entre las opciones, el navegador
+      // seleccionaria la primera, refreshDirty lo marcaria como cambio y
+      // Guardar quedaria habilitado sin que el usuario tocara nada: un
+      // clic y el valor real se pierde. Se añade como opcion propia.
+    const conocido = it.options.some((o) => val === String(o.v));
+    const extra = conocido ? ''
+      : `<option value="${esc(val)}" selected>${esc(val)} · (valor actual, no listado)</option>`;
+    control = `<select class="set-input" ${attrs}>${extra}${it.options.map((o) => `
       <option value="${esc(o.v)}"${val === String(o.v) ? ' selected' : ''}>${esc(o.v)} · ${esc(o.label)}</option>`).join('')}
     </select>`;
 
@@ -1767,7 +1851,8 @@ function boot() {
   refreshPlayers();
   clearInterval(statusTimer);
   statusTimer = setInterval(refreshStatus, 5000);
-  setInterval(() => { if (!document.hidden) refreshPlayers(); }, 45000);
+  clearInterval(playersTimer);
+  playersTimer = setInterval(() => { if (!document.hidden) refreshPlayers(); }, 45000);
 
   const initial = (location.hash || '').replace('#', '');
   goto(TITLES[initial] ? initial : 'overview');
