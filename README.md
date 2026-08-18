@@ -38,9 +38,9 @@ sudo PANEL_PASS='otra-clave' PZ_BRANCH=unstable PZ_SERVER_NAME=miserver bash ins
 | Variable | Por defecto | Para qué |
 |---|---|---|
 | `PANEL_USER` | `pzomboid037` | usuario del panel |
-| `PANEL_PASS` | `121212` | contraseña del panel |
+| `PANEL_PASS` | *aleatoria* | contraseña del panel; si no la pasas se genera y se imprime al final |
 | `PANEL_PORT` | `8080` | puerto HTTP del panel |
-| `PZ_ADMIN_PASSWORD` | `121212` | contraseña del admin **dentro del juego** |
+| `PZ_ADMIN_PASSWORD` | *aleatoria* | contraseña del admin **dentro del juego** |
 | `PZ_SERVER_NAME` | `pzserver` | nombre del mundo y del `.ini` |
 | `PZ_BRANCH` | `stable` | `unstable` para la build 42 |
 
@@ -124,8 +124,12 @@ credenciales y la sesión viajan en claro. Dos medidas, por orden de prioridad:
    (`caddy reverse-proxy --from tudominio --to :8080` obtiene el certificado
    solo) y cambia `secure: false` a `true` en la cookie de `panel/server.js`.
 
-La contraseña se guarda como hash scrypt con sal en `/opt/pzpanel/.env` (modo
-600); en claro no se almacena en ningún sitio. Para cambiarla:
+Las contraseñas se generan aleatorias si no las pasas, y se imprimen una única
+vez al terminar la instalación: **apúntalas**. La del panel se guarda como hash
+scrypt con sal en `/opt/pzpanel/.env` (modo 600), nunca en claro. Reinstalar no
+las cambia salvo que pases `PANEL_PASS` explícitamente.
+
+Para cambiarla:
 
 ```bash
 sudo -u pzuser node -e 'const c=require("crypto"),s=c.randomBytes(16).toString("hex");console.log(s+":"+c.scryptSync(process.argv[1],s,64).toString("hex"))' NUEVA_CLAVE

@@ -12,18 +12,33 @@ set -uo pipefail
 
 mkdir -p "$PZ_RUN_DIR" "$PZ_LOG_DIR"
 
-# rotamos la consola anterior para no acumular gigas
+# Rotamos conservando 5 generaciones. Con una sola, un bucle de reinicio
+# (RestartSec=20) borraba en 40 s el log del crash original, que es la unica
+# evidencia: la unidad redirige toda la salida aqui y journalctl queda mudo.
 if [[ -f "$PZ_CONSOLE_LOG" ]]; then
+    for i in 4 3 2 1; do
+        [[ -f "${PZ_CONSOLE_LOG}.${i}" ]] && mv -f "${PZ_CONSOLE_LOG}.${i}" "${PZ_CONSOLE_LOG}.$((i + 1))"
+    done
     mv -f "$PZ_CONSOLE_LOG" "${PZ_CONSOLE_LOG}.1"
 fi
 : > "$PZ_CONSOLE_LOG"
 
+falla() {
+    echo "[panel] ERROR: $*" | tee -a "$PZ_CONSOLE_LOG" >&2
+    exit 1
+}
+
+# Sin estas comprobaciones, un mkfifo fallido hacia que `exec 3<>` creara un
+# FICHERO REGULAR: java arrancaba con el como stdin, pz-cmd.sh respondia
+# siempre "el servidor no esta corriendo" y no habia forma ni de guardar.
 rm -f "$PZ_FIFO"
-mkfifo -m 600 "$PZ_FIFO"
+mkfifo -m 600 "$PZ_FIFO" || falla "no se pudo crear el FIFO $PZ_FIFO"
+[[ -p "$PZ_FIFO" ]] || falla "$PZ_FIFO existe pero no es un pipe"
+[[ -x "$PZ_SERVER_DIR/start-server.sh" ]] || falla "falta start-server.sh en $PZ_SERVER_DIR"
 
-exec 3<> "$PZ_FIFO"
+exec 3<> "$PZ_FIFO" || falla "no se pudo abrir $PZ_FIFO en lectura-escritura"
 
-cd "$PZ_SERVER_DIR" || exit 1
+cd "$PZ_SERVER_DIR" || falla "no se pudo entrar en $PZ_SERVER_DIR"
 
 {
     echo "--------------------------------------------------------------"

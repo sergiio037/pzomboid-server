@@ -11,11 +11,15 @@
 set -Eeuo pipefail
 
 # ----------------------------- configuracion ---------------------------------
+# Sin PANEL_PASS explicito se genera una aleatoria y se imprime al final.
+# Antes el valor por defecto estaba publicado en el README, en un panel que
+# se expone a internet.
+PANEL_PASS_EXPLICITA="${PANEL_PASS:-}"
 PANEL_USER="${PANEL_USER:-pzomboid037}"
-PANEL_PASS="${PANEL_PASS:-121212}"
+PANEL_PASS="${PANEL_PASS:-$(head -c 15 /dev/urandom | base64 | tr -d "/+=")}"
 PANEL_PORT="${PANEL_PORT:-8080}"
 
-PZ_ADMIN_PASSWORD="${PZ_ADMIN_PASSWORD:-121212}"
+PZ_ADMIN_PASSWORD="${PZ_ADMIN_PASSWORD:-$(head -c 15 /dev/urandom | base64 | tr -d "/+=")}"
 PZ_SERVER_NAME="${PZ_SERVER_NAME:-pzserver}"
 PZ_BRANCH="${PZ_BRANCH:-stable}"          # stable = B41 | unstable = B42
 PZ_APPID=380870
@@ -176,11 +180,28 @@ install -d -o "$SYS_USER" -g "$SYS_USER" -m 750 \
     "$PANEL_DIR" "$PANEL_BIN" "$PANEL_RUN" "$PANEL_LOG" "$PANEL_BACKUP" "$PANEL_TMP"
 cp -r "${SRC_DIR}/panel/." "$PANEL_DIR/"
 cp "${SRC_DIR}"/bin/*.sh "$PANEL_BIN/"
+# El flujo documentado es `gcloud compute scp` desde Windows, y ahi el
+# .gitattributes no interviene: un CRLF deja los scripts inservibles.
+sed -i 's/
+$//' "$PANEL_BIN"/*.sh
 chmod +x "$PANEL_BIN"/*.sh
 chown -R "$SYS_USER:$SYS_USER" "$PANEL_DIR"
 ok "archivos copiados a ${PANEL_DIR}"
 
 step "8/11  Generando credenciales y .env"
+# Una reinstalacion NO debe resetear las credenciales ni el secreto de
+# sesion: antes `cat > .env` truncaba sin copia y el banner acababa
+# imprimiendo una contrasena distinta de la que el usuario tenia guardada.
+REGENERAR_CREDS=1
+if [[ -f "$ENV_FILE" ]]; then
+    cp -a "$ENV_FILE" "${ENV_FILE}.$(date +%Y%m%d-%H%M%S).bak"
+    PREV_HASH="$(grep -m1 "^PANEL_PASS_HASH=" "$ENV_FILE" | cut -d= -f2- | tr -d '"')"
+    PREV_SECRET="$(grep -m1 "^PANEL_SECRET=" "$ENV_FILE" | cut -d= -f2- | tr -d '"')"
+    if [[ -z "${PANEL_PASS_EXPLICITA:-}" && -n "$PREV_HASH" ]]; then
+        REGENERAR_CREDS=0
+        ok "reinstalacion: se conservan la contrasena y el secreto de sesion"
+    fi
+fi
 PANEL_PASS_HASH="$(node -e '
   const c = require("crypto");
   const salt = c.randomBytes(16).toString("hex");
@@ -188,6 +209,14 @@ PANEL_PASS_HASH="$(node -e '
   process.stdout.write(salt + ":" + hash);
 ' "$PANEL_PASS")"
 PANEL_SECRET="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+
+# Reinstalacion sin PANEL_PASS explicito: se recupera lo anterior para no
+# invalidar ni la contrasena del usuario ni las sesiones abiertas.
+if (( ! REGENERAR_CREDS )); then
+    PANEL_PASS_HASH="$PREV_HASH"
+    PANEL_SECRET="${PREV_SECRET:-$PANEL_SECRET}"
+    PANEL_PASS="(sin cambios, la que ya tenias)"
+fi
 
 cat > "$ENV_FILE" <<ENVEOF
 PANEL_PORT="${PANEL_PORT}"
@@ -228,6 +257,10 @@ cat > /etc/systemd/system/${PZ_UNIT}.service <<UNITEOF
 Description=Project Zomboid Dedicated Server
 After=network-online.target
 Wants=network-online.target
+# Con RestartSec=20 nunca caben 5 arranques en los 10 s por defecto, asi que
+# el limitador no saltaba y un crash-loop se reintentaba para siempre.
+StartLimitIntervalSec=600
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -240,7 +273,7 @@ ExecStop=${PANEL_BIN}/pz-stop.sh
 Restart=on-failure
 RestartSec=20
 TimeoutStartSec=600
-TimeoutStopSec=180
+TimeoutStopSec=120
 KillMode=control-group
 LimitNOFILE=65536
 
@@ -270,8 +303,11 @@ WantedBy=multi-user.target
 UNITEOF
 
 # el panel necesita poder arrancar/parar el servicio del juego, y nada mas
+# Se genera en un temporal y solo se instala si visudo lo valida: un fichero
+# invalido en sudoers.d deja la VM sin sudo, y en GCP eso cuesta consola serie.
 SUDOERS=/etc/sudoers.d/pzpanel
-cat > "$SUDOERS" <<SUDOEOF
+TMP_SUDO="$(mktemp)"
+cat > "$TMP_SUDO" <<SUDOEOF
 Defaults:${SYS_USER} !requiretty
 ${SYS_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl start ${PZ_UNIT}, \\
     /usr/bin/systemctl start ${PZ_UNIT}.service, \\
@@ -281,8 +317,9 @@ ${SYS_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl start ${PZ_UNIT}, \\
     /usr/bin/systemctl restart ${PZ_UNIT}.service, \\
     /bin/systemctl start ${PZ_UNIT}, /bin/systemctl stop ${PZ_UNIT}, /bin/systemctl restart ${PZ_UNIT}
 SUDOEOF
-chmod 440 "$SUDOERS"
-visudo -c -f "$SUDOERS" >/dev/null || die "sudoers invalido"
+visudo -c -f "$TMP_SUDO" >/dev/null || { rm -f "$TMP_SUDO"; die "el sudoers generado es invalido, no se instala"; }
+install -m 440 -o root -g root "$TMP_SUDO" "$SUDOERS"
+rm -f "$TMP_SUDO"
 
 systemctl daemon-reload
 systemctl enable "${PZ_UNIT}.service" pzpanel.service >/dev/null 2>&1
@@ -290,7 +327,7 @@ ok "unidades ${PZ_UNIT}.service y pzpanel.service registradas"
 
 # ----------------------------- 11. primer arranque ---------------------------
 step "11/11  Primer arranque (genera los ficheros de configuracion)"
-systemctl start "${PZ_UNIT}.service"
+systemctl restart "${PZ_UNIT}.service"
 
 INI="${PZ_ZOMBOID_DIR}/Server/${PZ_SERVER_NAME}.ini"
 echo -n "    esperando a ${PZ_SERVER_NAME}.ini "
@@ -306,7 +343,7 @@ else
     warn "revisa:  journalctl -u ${PZ_UNIT} -f   y   tail -f ${PZ_CONSOLE_LOG}"
 fi
 
-systemctl start pzpanel.service
+systemctl restart pzpanel.service
 sleep 2
 systemctl is-active --quiet pzpanel.service \
     && ok "panel web activo" \

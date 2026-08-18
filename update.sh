@@ -26,10 +26,13 @@ fi
 
 # --- 2. copiar codigo --------------------------------------------------------
 # cp no borra: .env, node_modules, logs y backups del destino quedan intactos
+BIN_ANTES="$(md5sum "${PANEL_DIR}"/bin/*.sh 2>/dev/null | md5sum)"
 step "copiando panel/ y bin/"
 cp -r "${SRC_DIR}/panel/." "${PANEL_DIR}/"
 cp "${SRC_DIR}"/bin/*.sh "${PANEL_DIR}/bin/"
 chmod +x "${PANEL_DIR}"/bin/*.sh
+sed -i 's/\r$//' "${PANEL_DIR}"/bin/*.sh
+BIN_DESPUES="$(md5sum "${PANEL_DIR}"/bin/*.sh | md5sum)"
 chown -R "${SYS_USER}:${SYS_USER}" "$PANEL_DIR"
 [[ -f "${PANEL_DIR}/.env" ]] && chmod 600 "${PANEL_DIR}/.env"
 
@@ -50,7 +53,9 @@ else
     exit 1
 fi
 
-# los scripts de bin/ los lee systemd al arrancar el juego, no en caliente
-if git -C "$SRC_DIR" diff --name-only HEAD@{1} HEAD 2>/dev/null | grep -q '^bin/'; then
+# Aviso de que bin/ cambio. Antes dependia de HEAD@{1}: con el reflog vacio
+# (clon recien hecho, o despliegue por scp sin .git) el git diff fallaba, el
+# 2>/dev/null se lo tragaba y el operador no recibia aviso ninguno.
+if [[ "${BIN_ANTES:-}" != "${BIN_DESPUES:-}" ]]; then
     echo "${C_Y}aviso:${C_R} cambiaron scripts de bin/ — aplica con:  sudo systemctl restart pzserver"
 fi
