@@ -5,9 +5,13 @@ const fsp = fs.promises;
 const path = require('path');
 const crypto = require('crypto');
 const {
-  CFG, run, exists, dirSize, safeRelPath, isSafeName, resolveInside,
+  CFG, run, exists, dirSize, safeRelPath, isSafeName, resolveInside, quarantine,
   iniGetList, iniSetList,
 } = require('./util');
+// worlds solo depende de util, asi que no hay ciclo. Se reutiliza su
+// writeConfig para que TODA escritura del .ini pase por el mismo sitio:
+// copia fechada, poda y escritura atomica.
+const worlds = require('./worlds');
 
 /* ------------------------------------------------------------- lectura ini */
 
@@ -16,9 +20,16 @@ async function readIni() {
   catch { return ''; }
 }
 
+/**
+ * Toda modificacion del .ini desde aqui (activar/desactivar mods, IDs del
+ * Workshop, borrar un mod) pasa por writeConfig.
+ *
+ * Antes esto era un writeFile pelado, sin copia previa y sin atomicidad: es
+ * exactamente la ruta por la que se perdio la lista de mods al desactivarlos
+ * de uno en uno, y un fallo a media escritura dejaba el .ini vacio.
+ */
 async function writeIni(text) {
-  await fsp.mkdir(path.dirname(CFG.iniFile), { recursive: true });
-  await fsp.writeFile(CFG.iniFile, text, 'utf8');
+  await worlds.writeConfig('ini', text);
 }
 
 /* --------------------------------------------------------- parseo mod.info */
@@ -242,15 +253,20 @@ async function deleteMod(folder) {
     }
   }
 
-  await fsp.rm(full, { recursive: true, force: true });
-  return ids;
+  // A la papelera, no rm: un mod local subido a mano no esta en el Workshop.
+  const moved = await quarantine(full, CFG.modsTrashDir, 'borrado');
+  return { ids, quarantined: moved.name };
 }
 
 /* ------------------------------------------------------------- instalacion */
 
 function looksLikeModRoot(names) {
   const lower = names.map((n) => n.toLowerCase());
-  return lower.includes('mod.info') || lower.includes('media');
+  if (lower.includes('mod.info') || lower.includes('media')) return true;
+  // B42 reparte un mismo mod en <Mod>/42/mod.info junto a <Mod>/common/.
+  // Sin esto, el zip se trataba como una coleccion y quedaban carpetas
+  // sueltas mods/42 y mods/common que el siguiente zip volvia a pisar.
+  return lower.includes('common') || lower.some((n) => /^\d+$/.test(n));
 }
 
 /**
@@ -280,19 +296,43 @@ async function installZip(zipPath, originalName) {
     }
 
     const installed = [];
+    const raiz = path.resolve(CFG.modsDir);
+
     const move = async (from, folderName) => {
+      // Sin esto, un zip llamado '..zip' daba folderName '.', resolveInside
+      // devolvia la propia carpeta mods/ y el rm -rf se la llevaba entera.
+      if (!isSafeName(folderName)) {
+        throw Object.assign(new Error(`nombre de carpeta invalido: ${folderName}`), { status: 400 });
+      }
       const dest = resolveInside(CFG.modsDir, folderName);
-      await fsp.rm(dest, { recursive: true, force: true });
-      await fsp.rename(from, dest).catch(async () => {
+      if (dest === raiz || path.dirname(dest) !== raiz) {
+        throw Object.assign(new Error('destino invalido'), { status: 400 });
+      }
+
+      // La version anterior se aparta, no se borra: un mod subido a mano no
+      // esta en el Workshop y no habria forma de recuperarlo.
+      if (await exists(dest)) await quarantine(dest, CFG.modsTrashDir, 'sustituido');
+
+      try {
+        await fsp.rename(from, dest);
+      } catch {
         await fsp.mkdir(dest, { recursive: true });
-        await run('cp', ['-a', `${from}/.`, dest]);
-      });
+        const cp = await run('cp', ['-a', `${from}/.`, dest]);
+        // antes no se miraba el rc: una copia parcial se daba por instalada
+        if (cp.code !== 0) {
+          throw Object.assign(
+            new Error(`no se pudo instalar ${folderName}: ${cp.stderr.trim().slice(0, 160)}`),
+            { status: 500 },
+          );
+        }
+      }
       installed.push(folderName);
     };
 
     if (looksLikeModRoot(entries.map((e) => e.name))) {
       // el propio zip ES el mod: usamos el nombre del fichero como carpeta
-      const base = path.basename(originalName || 'mod', '.zip').replace(/[^\w .\-]/g, '_') || 'mod';
+      let base = path.basename(originalName || 'mod', '.zip').replace(/[^\w .\-]/g, '_');
+      if (!isSafeName(base)) base = 'mod';
       await move(root, base);
     } else {
       for (const e of entries) {

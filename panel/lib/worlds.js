@@ -4,7 +4,7 @@ const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
 const {
-  CFG, run, exists, dirSize, isSafeName, resolveInside,
+  CFG, run, exists, dirSize, fmtBytes, isSafeName, resolveInside, stamp, quarantine,
 } = require('./util');
 
 /* ------------------------------------------------------------------ mundos */
@@ -39,9 +39,11 @@ async function listWorlds() {
 }
 
 /**
- * Borra un mundo. Se exige que el servidor este parado: PZ mantiene las
- * bases de datos abiertas y borrarlas en caliente deja el proceso escribiendo
- * en ficheros huerfanos.
+ * Aparta un mundo a la papelera. NO lo borra: la regla del proyecto es que
+ * ninguna operacion destruye datos del usuario.
+ *
+ * Se sigue exigiendo el servidor parado. Renombrar bajo una JVM viva deja al
+ * proceso escribiendo en un inodo huerfano, que es peor que borrar.
  */
 async function deleteWorld(name, serverRunning) {
   if (!isSafeName(name)) throw Object.assign(new Error('nombre invalido'), { status: 400 });
@@ -52,17 +54,11 @@ async function deleteWorld(name, serverRunning) {
   }
   const full = resolveInside(CFG.savesDir, name);
   if (!await exists(full)) throw Object.assign(new Error('ese mundo no existe'), { status: 404 });
-  await fsp.rm(full, { recursive: true, force: true });
-  return true;
+  const moved = await quarantine(full, CFG.trashDir, 'borrado');
+  return { quarantined: moved.name };
 }
 
 /* ---------------------------------------------------------------- backups */
-
-function stamp() {
-  const d = new Date();
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
-}
 
 /** Ficheros de configuracion que acompañan al mundo dentro de la copia. */
 function configFileNames() {
@@ -100,13 +96,60 @@ async function backupWorld(name) {
     }
   }
 
-  const r = await run('tar', args, { timeout: 900000 });
-  if (r.code !== 0) {
-    await fsp.rm(dest, { force: true }).catch(() => {});
-    throw Object.assign(new Error(r.stderr.trim().slice(0, 300) || 'fallo al crear el backup'), { status: 500 });
+  // Con el disco lleno, tar deja un .tar.gz truncado que parece una copia buena.
+  const necesario = await dirSize(src);
+  const libre = await diskFree(CFG.backupDir);
+  if (libre > 0 && libre < necesario * 1.2) {
+    throw Object.assign(
+      new Error(`el mundo ocupa ${fmtBytes(necesario)} y solo quedan ${fmtBytes(libre)} libres`),
+      { status: 507 },
+    );
   }
+
+  // Se escribe a .part y se renombra al final: nunca queda visible una copia
+  // a medias si el panel se reinicia durante el tar.
+  const parcial = `${dest}.part`;
+  args[1] = parcial;
+
+  const r = await run('tar', args, { timeout: 900000 });
+
+  // rc=1 en GNU tar es AVISO, no error. El caso normal es "file changed as we
+  // read it" con jugadores conectados. Antes se borraba la copia y se
+  // respondia "fallo", justo cuando mas se queria tener la copia.
+  if (r.code >= 2) {
+    await fsp.rm(parcial, { force: true }).catch(() => {});
+    throw Object.assign(
+      new Error(r.stderr.trim().slice(0, 300) || 'fallo al crear el backup'), { status: 500 },
+    );
+  }
+  await fsp.rename(parcial, dest);
+
   const st = await fsp.stat(dest);
-  return { file, size: st.size, config: included };
+  return {
+    file,
+    size: st.size,
+    config: included,
+    warning: r.code === 1
+      ? 'el mundo cambiaba mientras se copiaba (servidor en marcha): la copia puede no ser del todo consistente'
+      : null,
+  };
+}
+
+/** Espacio libre en el sistema de ficheros que contiene `dir`, en bytes. */
+async function diskFree(dir) {
+  const r = await run('df', ['-B1', '--output=avail', dir], { timeout: 15000 });
+  const n = parseInt((r.stdout.split('\n')[1] || '').trim(), 10);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Barre los .part que dejo un tar interrumpido. Se llama al arrancar el panel. */
+async function sweepPartials() {
+  try {
+    const rest = (await fsp.readdir(CFG.backupDir))
+      .filter((n) => n.endsWith('.tar.gz.part'));
+    for (const n of rest) await fsp.rm(path.join(CFG.backupDir, n), { force: true }).catch(() => {});
+    return rest.length;
+  } catch { return 0; }
 }
 
 async function listBackups() {
@@ -177,16 +220,19 @@ async function restoreBackup(name, serverRunning) {
   const dest = resolveInside(CFG.savesDir, world);
   let movedTo = null;
 
+  // A la papelera, no a la carpeta de partidas: si no, tras dos restauraciones
+  // la lista de mundos es un cementerio de _antes-de-restaurar_.
   if (await exists(dest)) {
-    movedTo = `${world}_antes-de-restaurar_${stamp()}`;
-    await fsp.rename(dest, resolveInside(CFG.savesDir, movedTo));
+    movedTo = (await quarantine(dest, CFG.trashDir, 'restauracion')).name;
   }
 
   const r = await run('tar', ['-xzf', full, '-C', path.resolve(CFG.savesDir), world], { timeout: 900000 });
   if (r.code !== 0) {
     // deshacemos para no dejar al usuario sin mundo
     await fsp.rm(dest, { recursive: true, force: true }).catch(() => {});
-    if (movedTo) await fsp.rename(resolveInside(CFG.savesDir, movedTo), dest).catch(() => {});
+    if (movedTo) {
+      await fsp.rename(resolveInside(CFG.trashDir, movedTo), dest).catch(() => {});
+    }
     throw Object.assign(
       new Error(r.stderr.trim().slice(0, 300) || 'fallo al extraer la copia'), { status: 500 },
     );
@@ -195,17 +241,29 @@ async function restoreBackup(name, serverRunning) {
   // La configuracion se restaura con el mundo: es lo que devuelve el servidor
   // al estado exacto de la copia, incluida la lista de mods. La actual se
   // guarda con fecha antes de sobrescribir, asi que hay marcha atras.
-  const restoredConfig = [];
-  for (const cfg of configs) {
-    const target = resolveInside(CFG.serverCfgDir, cfg);
-    if (await exists(target)) {
-      await fsp.copyFile(target, `${target}.${stamp()}.bak`).catch(() => {});
+  let configFailed = null;
+  if (configs.length) {
+    for (const cfg of configs) {
+      const target = resolveInside(CFG.serverCfgDir, cfg);
+      if (await exists(target)) {
+        await fsp.copyFile(target, `${target}.${stamp()}.bak`).catch(() => {});
+        await pruneBaks(target);
+      }
     }
-    const rc = await run('tar', ['-xzf', full, '-C', path.resolve(CFG.serverCfgDir), cfg], { timeout: 120000 });
-    if (rc.code === 0) restoredConfig.push(cfg);
+    // Una sola pasada por el archivo, y el mismo timeout que el mundo: 120 s
+    // se quedaban cortos si el .tar.gz es grande y hay que recorrerlo entero.
+    const rc = await run(
+      'tar', ['-xzf', full, '-C', path.resolve(CFG.serverCfgDir), ...configs],
+      { timeout: 900000 },
+    );
+    // Antes se descartaba el error en silencio y el panel decia "restaurado"
+    // con la lista de mods sin recuperar, que es justo lo que promete.
+    if (rc.code !== 0) {
+      configFailed = rc.stderr.trim().slice(0, 200) || 'no se pudo restaurar la configuracion';
+    }
   }
 
-  return { world, movedTo, config: restoredConfig };
+  return { world, movedTo, config: configFailed ? [] : configs, configFailed };
 }
 
 /* -------------------------------------------------------- configuracion */
@@ -241,12 +299,33 @@ async function writeConfig(kind, text) {
   // Copia CON FECHA antes de sobrescribir. Con un unico .bak, varios guardados
   // seguidos pisaban el historial y se perdia el estado original: exactamente
   // lo que paso al desactivar mods de uno en uno.
+  //
+  // Si la copia falla NO seguimos: antes el .catch se lo tragaba y el writeFile
+  // truncaba igual, dejando el fichero cortado y sin copia de la version buena.
   if (await exists(file)) {
-    await fsp.copyFile(file, `${file}.${stamp()}.bak`).catch(() => {});
+    try {
+      await fsp.copyFile(file, `${file}.${stamp()}.bak`);
+    } catch (e) {
+      throw Object.assign(
+        new Error(`no se pudo crear la copia previa (${e.code || e.message}); no se ha tocado el fichero`),
+        { status: 507 },
+      );
+    }
     await pruneBaks(file);
   }
 
-  await fsp.writeFile(file, text, 'utf8');
+  // Escritura atomica: temporal, fsync y rename. writeFile abre con 'w', asi que
+  // un fallo a mitad dejaba el .ini vacio y el servidor arrancaba sin mods, sin
+  // contrasena y con todos los ajustes por defecto.
+  const tmp = `${file}.tmp`;
+  const fh = await fsp.open(tmp, 'w');
+  try {
+    await fh.writeFile(text, 'utf8');
+    await fh.sync();
+  } finally {
+    await fh.close();
+  }
+  await fsp.rename(tmp, file);
   return file;
 }
 
@@ -288,6 +367,6 @@ async function listConfigBaks(kind) {
 
 module.exports = {
   listWorlds, deleteWorld,
-  backupWorld, listBackups, backupPath, deleteBackup, restoreBackup,
+  backupWorld, listBackups, backupPath, deleteBackup, restoreBackup, sweepPartials,
   readConfig, writeConfig, listConfigBaks,
 };
