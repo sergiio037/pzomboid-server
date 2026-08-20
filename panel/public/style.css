@@ -956,3 +956,135 @@ input[type=range]::-moz-range-thumb{ width:9px; height:18px; border:0; border-ra
   .tag{ min-height:44px; }
   .tag button{ min-width:44px; min-height:44px; }
 }
+
+/* ============================================================================
+   LÁMPARA DE TRABAJO — el chasis bajo el instrumento
+   (pegar tal cual al final de style.css)
+   ----------------------------------------------------------------------------
+   Detrás de la superficie de trabajo hay una plancha de metal rayada. Sus
+   líneas son EXACTAMENTE del color del lienzo (--bg): delta 0/255, invisibles.
+   Una luz ancha y blanda sigue al cursor y aclara el metal ENTRE las líneas;
+   las líneas, opacas y pintadas POR ENCIMA de la luz, se quedan donde estaban.
+   Resultado: la rejilla aparece sólo donde hay luz y desaparece al alejarse,
+   sin una sola máscara y sin un solo repintado por frame.
+
+   TRES CAPAS DENTRO DE .main, EN ESTE ORDEN DE PINTADO:
+     .main         fondo --bg opaco, sin tocar          (paso 1)
+     #lamp         z-index:-2   el foco. Lo único que se mueve.
+     .main::before z-index:-1   las líneas del chasis + grano
+     .topbar, .views, tarjetas, filas, chips…           (pasos 3 y 6)
+
+   Todo lo que lleva texto es OPACO y se pinta después: ni un píxel de letra
+   recibe la luz. La luz sólo asoma por las juntas — el margen de .views, los
+   14 px entre bloques y el vacío bajo el contenido corto.
+
+   LA LUZ ES --bone, NO SEÑAL. Oliva, ámbar, óxido y hielo siguen significando
+   lo que significaban: aquí no aparece ninguno de los cuatro.
+
+   DEPENDENCIA: esto vive de que .views y .view NO tengan fondo propio. Si
+   algún día alguien le pone un background opaco a .views, a .view o a
+   .pl-grid, la lámpara desaparece sin dar error.
+   ========================================================================== */
+
+:root{
+  /* dial único de intensidad: 1 = como está, .6 = más tenue, 0 = apagada */
+  --lamp-gain:1;
+  --lamp-size:clamp(360px,46vw,620px);
+  --chassis-pitch:40px;
+  /* EXACTAMENTE el lienzo: sin luz la trama no existe (delta 0/255).
+     Con el núcleo del foco encima, el metal sube a #161814 y la línea
+     se queda en --bg (#080a07): delta 14/255. La misma rejilla, revelada sólo por la luz. */
+  --chassis-line:var(--bg);
+  --lamp-light:radial-gradient(circle closest-side,
+      rgba(236,231,217,.062)  0%,
+      rgba(236,231,217,.047) 20%,
+      rgba(236,231,217,.030) 40%,
+      rgba(236,231,217,.015) 58%,
+      rgba(236,231,217,.006) 74%,
+      rgba(236,231,217,0)    88%);
+  /* grano de 140 px: rompe el banding del degradado en paneles de 8 bits.
+     Se rasteriza UNA vez. Pon opacity='0' en el SVG para quitarlo. */
+  --chassis-grain:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='g' color-interpolation-filters='sRGB'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23g)' opacity='.016'/%3E%3C/svg%3E");
+}
+
+/* ÚNICA modificación de una regla existente, y sólo por adición: .main pasa a
+   ser contexto de apilamiento para poder colgar de ella dos capas negativas.
+   NO se le quita el fondo: sigue siendo --bg opaco. .app tampoco se toca, así
+   que su background:var(--line) sigue haciendo de red por si la rejilla de dos
+   columnas ganara un gap algún día. */
+.main{ position:relative; z-index:0; }
+
+/* --- las líneas del chasis: siempre, también sin JS y también en el móvil -- */
+.main::before{
+  content:""; position:absolute; inset:0; z-index:-1; pointer-events:none;
+  background-image:
+    linear-gradient(var(--chassis-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--chassis-line) 1px, transparent 1px),
+    var(--chassis-grain);
+  background-size:
+    var(--chassis-pitch) var(--chassis-pitch),
+    var(--chassis-pitch) var(--chassis-pitch),
+    140px 140px;
+}
+
+/* --- foco APARCADO: sin JS, sin cursor, o con movimiento reducido ---------
+   Estático, sin animación, sin transform, sin capa: coste de ejecución cero.
+   Es la lámpara del techo del taller, colgada sobre la mesa. --------------- */
+.main::after{
+  content:""; position:absolute; z-index:-2; pointer-events:none;
+  width:var(--lamp-size); height:var(--lamp-size);
+  left:calc(50% - var(--lamp-size)/2);
+  top:calc(var(--lamp-size)/-2.7);
+  background:var(--lamp-light); opacity:.7;
+}
+/* lamp.js pone .lamp-live en .main. La clase sólo aparece como SUJETO del
+   selector: Blink invalida .main y no baja al árbol. */
+.main.lamp-live::after{ content:none; }
+
+/* --- foco VIVO ------------------------------------------------------------
+   #lamp lo crea lamp.js dentro de .main. contain:layout paint lo aísla y
+   recorta el brazo contra la superficie de trabajo: la luz muere en el canto
+   de la barra lateral y del travesaño, que son otra plancha. -------------- */
+#lamp{
+  position:absolute; inset:0; z-index:-2; pointer-events:none;
+  overflow:hidden; contain:layout paint;
+}
+#lamp-arm{
+  position:absolute; top:0; left:0;
+  width:var(--lamp-size); height:var(--lamp-size);
+  margin:calc(var(--lamp-size)/-2) 0 0 calc(var(--lamp-size)/-2);
+  transform:translate3d(-9999px,-9999px,0);   /* fuera hasta el primer movimiento */
+  opacity:var(--lamp-gain);
+  will-change:transform;
+  transition:opacity .5s linear;
+}
+#lamp-lens{ position:absolute; inset:0; background:var(--lamp-light); }
+
+/* RESPIRACIÓN: el brazo y la lente están separados a propósito para que JS y
+   CSS no se peleen por transform. El JS mueve el brazo; la lente respira.
+   Sólo corre con .is-idle, 900 ms después del último movimiento, así que
+   nunca coincide con el seguimiento. transform y opacity: hilo del compositor. */
+#lamp.is-idle #lamp-lens{ animation:lamp-breathe 9s ease-in-out infinite alternate; }
+#lamp.is-away #lamp-arm{ opacity:0; }
+@keyframes lamp-breathe{
+  from{ transform:scale(1);     opacity:1;   }
+  to  { transform:scale(1.055); opacity:.78; }
+}
+
+/* --- sin cursor no hay lámpara -------------------------------------------
+   lamp.js ni la construye (matchMedia), así que no hay listeners, ni rAF, ni
+   nodos, ni capa de GPU. Esto es sólo el cinturón por si el fichero se carga
+   igual. Queda el chasis y el foco aparcado: coste de ejecución cero. ------ */
+@media (hover:none),(pointer:coarse){
+  #lamp{ display:none; }
+}
+
+/* --- movimiento apagado ---------------------------------------------------
+   El bloque prefers-reduced-motion de más arriba ya mata la respiración con
+   animation:none !important. Esto mata además el SEGUIMIENTO, que no es una
+   animación CSS, y devuelve el foco aparcado. lamp.js hace lo mismo por su
+   cuenta y reacciona en caliente si el usuario cambia el ajuste del sistema. */
+@media (prefers-reduced-motion:reduce){
+  #lamp{ display:none !important; }
+  .main.lamp-live::after{ content:""; }
+}
