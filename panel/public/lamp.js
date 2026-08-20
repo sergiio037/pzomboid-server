@@ -34,6 +34,10 @@
   var MAX_NODOS = 70;
   var D_ENLACE = 132;   // distancia máxima para unir dos nodos
   var D_RATON  = 168;   // radio de influencia del cursor
+  var GRAVEDAD = 0.52;  // tirón del cursor. Sube despacio: a 1 ya se nota "pegajoso"
+  var VIDA_MIN = 1500;  // frames. A 60 fps son 25 s
+  var VIDA_MAX = 4200;  // ~70 s
+  var FUNDIDO  = 0.18;  // fracción de la vida que dura el entrar y el salir
 
   var hosts = [];
   var ro = null, rafLamp = 0, rafRed = 0, idle = 0;
@@ -87,19 +91,35 @@
 
   /* ------------------------------------------------------------------ nodos */
 
+  /* Un nodo nuevo. `repartido` sólo en la siembra inicial: así los primeros
+     no nacen todos a la vez y el relevo nunca se percibe como una tanda. */
+  function nodo(w, hh, repartido) {
+    var vida = VIDA_MIN + Math.random() * (VIDA_MAX - VIDA_MIN);
+    return {
+      x: Math.random() * w,
+      y: Math.random() * hh,
+      vx: (Math.random() - 0.5) * 0.16,
+      vy: (Math.random() - 0.5) * 0.16,
+      r: 0.8 + Math.random() * 1.5,
+      vida: vida,
+      edad: repartido ? Math.random() * vida : 0,
+    };
+  }
+
+  /* Opacidad por edad: entra, vive y se va. Con FUNDIDO al 18 % de una vida de
+     25-70 s, el fundido dura entre 4 y 12 segundos: imposible de pillar. */
+  function fundido(a) {
+    var t = a.edad / a.vida;
+    if (t < FUNDIDO) return t / FUNDIDO;
+    if (t > 1 - FUNDIDO) return (1 - t) / FUNDIDO;
+    return 1;
+  }
+
   function sembrar(h) {
     var w = h.cv.clientWidth, hh = h.cv.clientHeight;
     var n = Math.min(MAX_NODOS, Math.max(14, Math.round((w * hh) / DENSIDAD)));
     h.nodos = [];
-    for (var i = 0; i < n; i++) {
-      h.nodos.push({
-        x: Math.random() * w,
-        y: Math.random() * hh,
-        vx: (Math.random() - 0.5) * 0.16,
-        vy: (Math.random() - 0.5) * 0.16,
-        r: 0.8 + Math.random() * 1.5,
-      });
-    }
+    for (var i = 0; i < n; i++) h.nodos.push(nodo(w, hh, true));
   }
 
   function medirCanvas(h) {
@@ -134,12 +154,17 @@
         a = ns[i];
         a.x += a.vx; a.y += a.vy;
 
+        // envejece; al agotarse renace en otro sitio, ya desvanecido
+        a.edad++;
+        if (a.edad >= a.vida) ns[i] = a = nodo(w, hh, false);
+        a.op = fundido(a);
+
         // el cursor tira suavemente de los nodos cercanos
         if (dentro) {
           dx = mx - a.x; dy = my - a.y; d2 = dx * dx + dy * dy;
           if (d2 < D_RATON * D_RATON && d2 > 1) {
             d = Math.sqrt(d2);
-            var f = (1 - d / D_RATON) * 0.35;
+            var f = (1 - d / D_RATON) * GRAVEDAD;
             a.x += (dx / d) * f; a.y += (dy / d) * f;
           }
         }
@@ -158,7 +183,8 @@
           dx = a.x - b.x; dy = a.y - b.y; d2 = dx * dx + dy * dy;
           if (d2 > D_ENLACE * D_ENLACE) continue;
           d = Math.sqrt(d2);
-          ctx.strokeStyle = 'rgba(180,210,74,' + ((1 - d / D_ENLACE) * 0.13).toFixed(3) + ')';
+          ctx.strokeStyle = 'rgba(180,210,74,'
+            + ((1 - d / D_ENLACE) * 0.13 * a.op * b.op).toFixed(3) + ')';
           ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
         }
       }
@@ -170,7 +196,8 @@
           dx = mx - a.x; dy = my - a.y; d2 = dx * dx + dy * dy;
           if (d2 > D_RATON * D_RATON) continue;
           d = Math.sqrt(d2);
-          ctx.strokeStyle = 'rgba(92,200,255,' + ((1 - d / D_RATON) * 0.3).toFixed(3) + ')';
+          ctx.strokeStyle = 'rgba(92,200,255,'
+            + ((1 - d / D_RATON) * 0.3 * a.op).toFixed(3) + ')';
           ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(mx, my); ctx.stroke();
         }
       }
@@ -184,8 +211,8 @@
           if (d2 < D_RATON * D_RATON) cerca = 1 - Math.sqrt(d2) / D_RATON;
         }
         ctx.fillStyle = cerca > 0.05
-          ? 'rgba(92,200,255,' + (0.24 + cerca * 0.5).toFixed(3) + ')'
-          : 'rgba(236,231,217,0.24)';
+          ? 'rgba(92,200,255,' + ((0.24 + cerca * 0.5) * a.op).toFixed(3) + ')'
+          : 'rgba(236,231,217,' + (0.24 * a.op).toFixed(3) + ')';
         ctx.beginPath();
         ctx.arc(a.x, a.y, a.r + cerca * 1.4, 0, 6.283);
         ctx.fill();
