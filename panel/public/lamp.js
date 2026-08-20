@@ -138,7 +138,26 @@
     rafRed = requestAnimationFrame(pintar);
     for (var k = 0; k < hosts.length; k++) {
       var h = hosts[k];
-      if (!h.ctx || !h.nodos) continue;
+      if (!h.ctx) continue;
+
+      /* AUTOCURACION. build() corre con .main Y .login-screen todavia en
+         display:none (app.js no decide cual mostrar hasta que resuelve
+         /api/session), asi que medirCanvas sale por su guarda y h.nodos queda
+         null. El ResizeObserver deberia rescatarlo al des-ocultar, pero no lo
+         hace: medido en Chrome, el canvas de .main seguia a 300x150 con el
+         bitmap VACIO (suma de alfa 0) despues de entrar al panel — o sea, el
+         dashboard no tenia ni un nodo. Solo un 'resize' de ventana lo salvaba.
+         Aqui se remide en cuanto el anfitrion tiene caja, pase lo que pase con
+         el observer. remedir() ademas recalcula origin(), que tambien estaba
+         rancio (.main mide left=0 mientras esta oculto, pero ~232 despues, y
+         el cursor tiraba de los nodos desplazado por esa diferencia).
+         Un anfitrion oculto cuesta una lectura de clientWidth y se va. */
+      if (!h.nodos) {
+        if (!h.el.clientWidth || !h.el.clientHeight) continue;
+        remedir();
+        if (!h.nodos) continue;
+      }
+
       var w = h.cv.clientWidth, hh = h.cv.clientHeight;
       if (!w || !hh) continue;
 

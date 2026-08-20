@@ -1160,3 +1160,45 @@ input[type=range]::-moz-range-thumb{ width:9px; height:18px; border:0; border-ra
 }
 /* el halo estático de bienvenida, todavía más discreto */
 .main::after{ opacity:.35; }
+
+/* ============================================================================
+   3 · REJILLA DEL LOGIN — homogénea y estable
+   ----------------------------------------------------------------------------
+   El chasis se calibró para .main, cuyo lienzo ES --bg: allí la línea
+   (--chassis-line = --bg = #080a07) da delta 0/255 y sólo la lámpara la revela.
+   Pero el suelo del login NO es --bg, es .login-bg = --void (#050604), así que
+   esa misma línea quedaba a un delta permanente de (+3,+4,+3) = 3,7/255 de luma.
+   Eso es el suelo de cuantización de 8 bits: ahí el dithering del panel y la
+   compresión por bloques deciden región por región si la línea sobrevive o se
+   aplana, y eso es lo que se veía como parches rectangulares. Medido en el
+   navegador: señal 3/255, ruido del grano 2/255 — se solapaban.
+
+   El valor de abajo es EXACTAMENTE el color que la rejilla original del login
+   componía en el centro de su máscara (--line al 55 % sobre --void): rgb(22,26,19).
+   O sea, la rejilla se ve como siempre se quiso ver, pero igual en toda la
+   pantalla en vez de sólo en el centro. Delta 19/255 de luma, 5,1× el anterior.
+
+   NO BAJAR de ~#141810: con el núcleo del foco encima el hueco sube a luma 20,6
+   y la línea (que va POR ENCIMA de la lámpara, z-index -1 vs -2) se quedaría
+   más oscura que su propio hueco. La rejilla se vería en negativo bajo el cursor.
+   Este hex es el único dial si se quiere más o menos marcada.
+   ========================================================================== */
+.login-screen{ --chassis-line:#161a13; }
+
+/* La rejilla enmascarada de .login-bg::after (líneas 153-160) es código muerto
+   a efectos de píxeles: mismo paso (40px) y mismo origen (0,0) que el chasis
+   —las tres cajas son inset:0 contra la misma caja de relleno de .login-screen—
+   y el chasis va encima con línea OPACA, así que la tapa píxel a píxel. Por eso
+   el degradado radial del login ya no se veía. Se apaga para dejar UNA sola
+   rejilla y quitar de en medio la única capa con mask-image del login. */
+.login-bg::after{ content:none; }
+
+/* Un <canvas> es un elemento REEMPLAZADO: inset:0 NO lo estira. CSS 2.1 §10.3.8
+   y §10.6.5 resuelven width/height por el tamaño intrínseco (300×150) y §10.3.7
+   ignora `right` por sobrerrestricción. Medido: el canvas del login era una caja
+   de 300×150 en (0,0) mientras lamp.js no llegaba a dimensionarlo — build() corre
+   con los dos anfitriones en display:none y medirCanvas sale por su guarda
+   `if (!w || !hh) return`. Con esto la caja es correcta desde el primer frame;
+   el style.width en píxeles que escribe medirCanvas sigue mandando por ser
+   estilo en línea, y da el mismo resultado. */
+.nodes{ width:100%; height:100%; }
