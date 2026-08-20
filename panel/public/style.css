@@ -1173,17 +1173,15 @@ input[type=range]::-moz-range-thumb{ width:9px; height:18px; border:0; border-ra
    aplana, y eso es lo que se veía como parches rectangulares. Medido en el
    navegador: señal 3/255, ruido del grano 2/255 — se solapaban.
 
-   El valor de abajo es EXACTAMENTE el color que la rejilla original del login
-   componía en el centro de su máscara (--line al 55 % sobre --void): rgb(22,26,19).
-   O sea, la rejilla se ve como siempre se quiso ver, pero igual en toda la
-   pantalla en vez de sólo en el centro. Delta 19/255 de luma, 5,1× el anterior.
+   ARREGLO: la línea se pinta con el color del suelo del login, --void, igual
+   que en .main se pinta con el color del suelo de .main, que es --bg. Delta 0
+   en las dos pantallas: la rejilla no existe hasta que la lámpara la levanta.
+   Ese era el diseño original; sólo estaba mal parametrizado aquí.
 
-   NO BAJAR de ~#141810: con el núcleo del foco encima el hueco sube a luma 20,6
-   y la línea (que va POR ENCIMA de la lámpara, z-index -1 vs -2) se quedaría
-   más oscura que su propio hueco. La rejilla se vería en negativo bajo el cursor.
-   Este hex es el único dial si se quiere más o menos marcada.
+   El token global (línea 997) NO sirve para esto: vale --bg, que es el suelo
+   del dashboard pero no el del login. Es todo el origen del fallo.
    ========================================================================== */
-.login-screen{ --chassis-line:#161a13; }
+.login-screen{ --chassis-line:var(--void); }
 
 /* La rejilla enmascarada de .login-bg::after (líneas 153-160) es código muerto
    a efectos de píxeles: mismo paso (40px) y mismo origen (0,0) que el chasis
@@ -1202,3 +1200,47 @@ input[type=range]::-moz-range-thumb{ width:9px; height:18px; border:0; border-ra
    el style.width en píxeles que escribe medirCanvas sigue mandando por ser
    estilo en línea, y da el mismo resultado. */
 .nodes{ width:100%; height:100%; }
+
+/* ============================================================================
+   4 · FUERA EL SLAB VERDE
+   ----------------------------------------------------------------------------
+   El truco de filetes de la línea 333 pinta el contenedor entero de --line
+   (#242b20, oliva) y confía en que las celdas OPACAS lo tapen, dejando ver el
+   color sólo por los huecos de 1px. El propio comentario de la línea 339 lo
+   dice: "toda celda debe ser OPACA o el filete se le ve por debajo".
+
+   Dos cosas lo rompieron:
+     · el rediseño hizo .card translúcida (--panel-a, alfa .62), y como
+       `.card` y `.set-groups > *` tienen la misma especificidad gana la que va
+       después en el fichero — la translúcida. El verde se ve a través.
+     · ningún contenedor lo cubre del todo: .set-groups tiene align-items:start
+       y la columna corta deja el resto al aire. Medido en el navegador con
+       tres grupos: 953 px de alto de verde desnudo. Auditadas las 7 vistas,
+       .cards deja el 35 %, .chips el 20 %, .table el 29 %, .cmd-grid el 4,5 %.
+
+   ARREGLO: el filete deja de ser un relleno del contenedor y pasa a la celda,
+   que es la que sabe dónde termina. Así no hay nada que tapar y por los huecos
+   se ve el fondo de la página — la rejilla, los nodos y la lámpara.
+   ========================================================================== */
+.cards,.grid-2,.set-groups,.set-list,.table,.mod-list,.pl-list,.cmd-grid,.chips{
+  background:transparent;
+}
+
+/* Listas de una columna: basta un borde superior a partir del segundo hijo.
+   No se duplica con nada y no añade ni un píxel de pintado — importante en
+   .set-list, cuyas 71 filas se reevalúan en cada input del slider (línea 654).
+   Los selectores con clase repiten la forma de la línea 337 (`.table > .trow`,
+   que pone border:0) para empatar en especificidad y ganar por orden. */
+.set-list,.table,.mod-list,.pl-list{ gap:0; }
+.set-list > * + *,.table > * + *,.mod-list > * + *,.pl-list > * + *,
+.set-list > .set-row + .set-row,.table > .trow + .trow,
+.mod-list > .mod + .mod,.pl-list > .pl-item + .pl-item{
+  border-top:1px solid var(--line);
+}
+
+/* Rejillas 2D: anillo de 1px por celda. Con el gap:1px que ya tenían, los
+   anillos de dos celdas contiguas caen en el MISMO hueco, así que se sigue
+   viendo una sola línea y no dos. Son pocas celdas, el box-shadow no pesa. */
+.cards > *,.grid-2 > *,.set-groups > *,.cmd-grid > *,.chips > *{
+  box-shadow:0 0 0 1px var(--line);
+}
