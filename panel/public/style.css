@@ -1088,3 +1088,82 @@ input[type=range]::-moz-range-thumb{ width:9px; height:18px; border:0; border-ra
   #lamp{ display:none !important; }
   .main.lamp-live::after{ content:""; }
 }
+
+/* ============================================================================
+   AJUSTES DEL FONDO — respuesta a tres cosas vistas en uso real
+     1. Las tarjetas tapaban el chasis. Ahora son translúcidas: la luz de la
+        lámpara y el polvo se ven POR DEBAJO del contenido.
+     2. El login no tenía fondo: se le monta el mismo chasis y su propia lámpara.
+     3. Movimiento propio aunque el ratón esté quieto: polvo en suspensión.
+   ========================================================================== */
+
+/* --- 1 · tarjetas translúcidas ------------------------------------------- */
+/* --panel es #0d100c y el chasis --bg es #080a07, MÁS OSCURO: al volverse
+   translúcida la tarjeta se oscurece, así que el contraste del texto sube en
+   vez de bajar. Sólo donde la lámpara ilumina se aclara, y muy poco. */
+:root{
+  --panel-a:rgba(13,16,12,.62);
+  --panel-2a:rgba(18,22,17,.72);
+}
+.card{ background:var(--panel-a); }
+.card-head{ background:var(--panel-2a); }
+.set-bar{ background:var(--panel-2a); }
+/* La consola y el editor NO se tocan: son superficies de lectura densa y
+   necesitan fondo opaco y estable bajo texto pequeño. */
+.console,.editor,.console-card{ background:var(--void); }
+
+/* --- 2 · chasis y lámpara también en el login ---------------------------- */
+.login-screen{ position:relative; z-index:0; isolation:isolate; }
+.login-screen::after{
+  content:""; position:absolute; inset:0; z-index:-1; pointer-events:none;
+  background-image:
+    linear-gradient(var(--chassis-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--chassis-line) 1px, transparent 1px),
+    var(--chassis-grain);
+  background-size:
+    var(--chassis-pitch) var(--chassis-pitch),
+    var(--chassis-pitch) var(--chassis-pitch),
+    140px 140px;
+}
+/* el velo radial original del login se queda, pero por debajo del chasis */
+.login-bg{ z-index:-2; }
+
+/* --- 3 · polvo en suspensión --------------------------------------------- */
+/* Compositor puro: sólo transform y opacity, sin una línea de JS por frame.
+   18 motas por anfitrión, cada una con su duración, retardo y deriva. */
+.dust{
+  position:absolute; inset:0; z-index:-1; pointer-events:none; overflow:hidden;
+  contain:strict;
+}
+.dust i{
+  position:absolute; left:var(--x); top:var(--y);
+  width:2px; height:2px; border-radius:50%;
+  background:var(--bone); opacity:0;
+  transform:scale(var(--s));
+  animation:mota var(--d) linear var(--t) infinite;
+  will-change:transform,opacity;
+}
+@keyframes mota{
+  0%   { opacity:0;    transform:translate3d(0,0,0) scale(var(--s)); }
+  14%  { opacity:.16; }
+  78%  { opacity:.10; }
+  100% { opacity:0;    transform:translate3d(var(--dx),var(--dy),0) scale(var(--s)); }
+}
+/* En el login, con casi todo el lienzo vacío, se permiten algo más visibles. */
+.login-screen .dust i{ animation-name:mota-login; }
+@keyframes mota-login{
+  0%   { opacity:0;    transform:translate3d(0,0,0) scale(var(--s)); }
+  12%  { opacity:.26; }
+  80%  { opacity:.16; }
+  100% { opacity:0;    transform:translate3d(var(--dx),var(--dy),0) scale(var(--s)); }
+}
+
+/* Sin cursor el polvo sigue: es ambiente, no interacción. Pero se reduce a la
+   mitad de opacidad para no competir con la lectura en una pantalla pequeña. */
+@media (hover:none),(pointer:coarse){
+  .dust i{ opacity:0; animation-duration:calc(var(--d) * 1.6); }
+}
+
+@media (prefers-reduced-motion:reduce){
+  .dust{ display:none !important; }
+}
