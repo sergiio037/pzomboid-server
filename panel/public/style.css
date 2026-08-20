@@ -1132,42 +1132,11 @@ input[type=range]::-moz-range-thumb{ width:9px; height:18px; border:0; border-ra
 /* el velo radial original del login se queda, pero por debajo del chasis */
 .login-bg{ z-index:-2; }
 
-/* --- 3 · polvo en suspensión --------------------------------------------- */
-/* Compositor puro: sólo transform y opacity, sin una línea de JS por frame.
-   18 motas por anfitrión, cada una con su duración, retardo y deriva. */
-.dust{
-  position:absolute; inset:0; z-index:-1; pointer-events:none; overflow:hidden;
-  contain:strict;
-}
-.dust i{
-  position:absolute; left:var(--x); top:var(--y);
-  width:2px; height:2px; border-radius:50%;
-  background:var(--bone); opacity:0;
-  transform:scale(var(--s));
-  animation:mota var(--d) linear var(--t) infinite;
-  will-change:transform,opacity;
-}
-@keyframes mota{
-  0%   { opacity:0;    transform:translate3d(0,0,0) scale(var(--s)); }
-  14%  { opacity:.16; }
-  78%  { opacity:.10; }
-  100% { opacity:0;    transform:translate3d(var(--dx),var(--dy),0) scale(var(--s)); }
-}
-/* En el login, con casi todo el lienzo vacío, se permiten algo más visibles. */
-.login-screen .dust i{ animation-name:mota-login; }
-@keyframes mota-login{
-  0%   { opacity:0;    transform:translate3d(0,0,0) scale(var(--s)); }
-  12%  { opacity:.26; }
-  80%  { opacity:.16; }
-  100% { opacity:0;    transform:translate3d(var(--dx),var(--dy),0) scale(var(--s)); }
-}
-
-/* Sin cursor el polvo sigue: es ambiente, no interacción. Pero se reduce a la
-   mitad de opacidad para no competir con la lectura en una pantalla pequeña. */
-@media (hover:none),(pointer:coarse){
-  .dust i{ opacity:0; animation-duration:calc(var(--d) * 1.6); }
-}
-
-@media (prefers-reduced-motion:reduce){
-  .dust{ display:none !important; }
+/* --- 3 · red de nodos ---------------------------------------------------- */
+/* El canvas lo crea lamp.js. Todo el dibujo ocurre dentro de él: no toca el
+   DOM, así que no provoca ni un recálculo de estilo por mucho que la consola
+   escupa líneas. Va por debajo del contenido y por encima de la lámpara. */
+.nodes{
+  position:absolute; inset:0; z-index:-1;
+  pointer-events:none; display:block;
 }

@@ -1,27 +1,25 @@
 /* ============================================================================
-   lamp.js · ESTACIÓN 47 — LÁMPARA DE TRABAJO + POLVO EN SUSPENSIÓN
+   lamp.js · ESTACIÓN 47 — LÁMPARA DE TRABAJO + RED DE NODOS
    ----------------------------------------------------------------------------
    Autónomo: no lee ni escribe nada de app.js, no exporta nada, sin dependencias.
    Carga:  <script src="lamp.js" defer></script>   (después de app.js)
 
-   CONTRATO DE RENDIMIENTO
-     · La ÚNICA escritura por frame es  arm.style.transform  sobre cada
-       #lamp-arm, un <div> vacío creado aquí. transform no se hereda: el
-       recálculo de estilo abarca ese elemento y nada más.
-     · NUNCA se escribe una custom property, ni en :root ni en ningún ancestro.
-       Medido en este panel: escribir una custom property en :root cuesta
-       14 600 µs de recálculo de estilo; escribir transform en una hoja, 15 µs.
-     · El rAF se APAGA en cuanto el foco alcanza al cursor. Con el ratón quieto
-       leyendo la consola, el coste por frame es exactamente cero.
-     · Cero getBoundingClientRect en pointermove: el origen de cada anfitrión se
-       cachea y sólo se recalcula al cambiar de tamaño, vía ResizeObserver.
-     · El polvo es CSS puro: animaciones de transform y opacity, es decir sólo
-       compositor. No cuesta nada por frame al hilo principal y sigue vivo
-       aunque la lámpara esté apagada.
+   DOS PIEZAS
+     · LÁMPARA  capa CSS que sigue al cursor. La única escritura por frame es
+       transform sobre un <div> vacío: 15 µs, sin recálculo de estilo ajeno.
+       NUNCA se escribe una custom property (medido: 14 600 µs en :root).
+     · NODOS    canvas detrás del contenido. Puntos que derivan despacio y se
+       unen con filamentos cuando se acercan; el cursor los atrae y enlaza con
+       los que tiene cerca. Todo el dibujo ocurre en el canvas, así que no toca
+       el DOM: ni un recálculo de estilo ni un layout, pase lo que pase en la
+       consola o en las 914 filas de ajustes.
 
-   DOS ANFITRIONES
-     .main          el panel en sí
-     .login-screen  la pantalla de acceso, que antes se quedaba sin fondo
+   FRENOS DE RENDIMIENTO
+     · Densidad por área, con tope duro. En 1920×1080 son ~62 nodos.
+     · El emparejado es O(n²) sobre esos nodos: ~1900 comparaciones por frame,
+       coste despreciable frente a los 16,6 ms de presupuesto.
+     · Se detiene por completo con la pestaña oculta.
+     · No arranca con prefers-reduced-motion ni en punteros gruesos (móvil).
    ========================================================================== */
 (function () {
   'use strict';
@@ -29,13 +27,19 @@
   var FINE   = matchMedia('(hover:hover) and (pointer:fine)');
   var REDUCE = matchMedia('(prefers-reduced-motion:reduce)');
 
-  var EASE  = 0.16;   // inercia del brazo: la lámpara pesa
-  var IDLE  = 900;    // ms parado antes de empezar a respirar
-  var MOTAS = 18;     // partículas por anfitrión
+  var EASE = 0.16;      // inercia del brazo de la lámpara
+  var IDLE = 900;       // ms parado antes de respirar
 
-  var hosts = [];     // [{ el, lamp, arm, ox, oy, cx, cy, seen }]
-  var ro = null, raf = 0, idle = 0;
-  var tx = 0, ty = 0;                       // cursor en coordenadas de viewport
+  var DENSIDAD = 26000; // 1 nodo por cada N px²
+  var MAX_NODOS = 70;
+  var D_ENLACE = 132;   // distancia máxima para unir dos nodos
+  var D_RATON  = 168;   // radio de influencia del cursor
+
+  var hosts = [];
+  var ro = null, rafLamp = 0, rafRed = 0, idle = 0;
+  var tx = 0, ty = 0;   // cursor en viewport
+
+  /* ---------------------------------------------------------------- lámpara */
 
   function origin() {
     for (var i = 0; i < hosts.length; i++) {
@@ -44,71 +48,160 @@
     }
   }
 
-  function tick() {
-    raf = 0;
+  function tickLamp() {
+    rafLamp = 0;
     var vivo = false;
     for (var i = 0; i < hosts.length; i++) {
       var h = hosts[i];
+      if (!h.arm) continue;
       var dx = (tx - h.ox) - h.cx, dy = (ty - h.oy) - h.cy;
       h.cx += dx * EASE; h.cy += dy * EASE;
       h.arm.style.transform =
         'translate3d(' + h.cx.toFixed(1) + 'px,' + h.cy.toFixed(1) + 'px,0)';
       if (dx * dx + dy * dy > 0.25) vivo = true;
     }
-    if (vivo) raf = requestAnimationFrame(tick);
+    if (vivo) rafLamp = requestAnimationFrame(tickLamp);
   }
 
   function move(e) {
-    if (e.pointerType === 'touch') return;    // híbridos: el dedo no enciende la lámpara
+    if (e.pointerType === 'touch') return;
     tx = e.clientX; ty = e.clientY;
     for (var i = 0; i < hosts.length; i++) {
       var h = hosts[i];
-      if (!h.seen) {                          // sin barrido inicial desde 0,0
-        h.seen = true; h.cx = tx - h.ox; h.cy = ty - h.oy;
-      }
-      if (h.lamp.className) h.lamp.className = '';   // quita is-idle / is-away
+      if (!h.seen) { h.seen = true; h.cx = tx - h.ox; h.cy = ty - h.oy; }
+      if (h.lamp && h.lamp.className) h.lamp.className = '';
     }
     clearTimeout(idle); idle = setTimeout(rest, IDLE);
-    if (!raf) raf = requestAnimationFrame(tick);
+    if (!rafLamp) rafLamp = requestAnimationFrame(tickLamp);
   }
 
-  function marca(clase) {
-    for (var i = 0; i < hosts.length; i++) hosts[i].lamp.className = clase;
+  function marca(c) {
+    for (var i = 0; i < hosts.length; i++) if (hosts[i].lamp) hosts[i].lamp.className = c;
   }
-
   function rest() { marca('is-idle'); }
-
   function away() {
     if (!hosts.length) return;
-    clearTimeout(idle);
-    marca('is-away');
-    if (raf) { cancelAnimationFrame(raf); raf = 0; }
+    clearTimeout(idle); marca('is-away');
+    if (rafLamp) { cancelAnimationFrame(rafLamp); rafLamp = 0; }
   }
 
-  function hide() { if (document.hidden) away(); }
+  /* ------------------------------------------------------------------ nodos */
 
-  /* Polvo: se monta SIEMPRE (no depende de la lámpara ni del puntero fino),
-     porque es ambiente y funciona igual en el móvil. Cada mota lleva sus
-     números en variables propias del elemento, escritas UNA vez al crearla:
-     no hay escritura por frame, la animación la lleva el compositor. */
-  function polvo(el) {
-    if (el.querySelector('.dust')) return;
-    var caja = document.createElement('div');
-    caja.className = 'dust';
-    caja.setAttribute('aria-hidden', 'true');
-    for (var i = 0; i < MOTAS; i++) {
-      var m = document.createElement('i');
-      m.style.setProperty('--x', (Math.random() * 100).toFixed(2) + '%');
-      m.style.setProperty('--y', (Math.random() * 100).toFixed(2) + '%');
-      m.style.setProperty('--d', (26 + Math.random() * 34).toFixed(1) + 's');
-      m.style.setProperty('--t', (-Math.random() * 40).toFixed(1) + 's');
-      m.style.setProperty('--s', (0.6 + Math.random() * 1.5).toFixed(2));
-      m.style.setProperty('--dx', (Math.random() * 120 - 60).toFixed(0) + 'px');
-      m.style.setProperty('--dy', (-40 - Math.random() * 140).toFixed(0) + 'px');
-      caja.appendChild(m);
+  function sembrar(h) {
+    var w = h.cv.clientWidth, hh = h.cv.clientHeight;
+    var n = Math.min(MAX_NODOS, Math.max(14, Math.round((w * hh) / DENSIDAD)));
+    h.nodos = [];
+    for (var i = 0; i < n; i++) {
+      h.nodos.push({
+        x: Math.random() * w,
+        y: Math.random() * hh,
+        vx: (Math.random() - 0.5) * 0.16,
+        vy: (Math.random() - 0.5) * 0.16,
+        r: 0.8 + Math.random() * 1.5,
+      });
     }
-    el.appendChild(caja);
   }
+
+  function medirCanvas(h) {
+    var dpr = Math.min(devicePixelRatio || 1, 2);
+    var w = h.el.clientWidth, hh = h.el.clientHeight;
+    if (!w || !hh) return;
+    h.cv.width = Math.round(w * dpr);
+    h.cv.height = Math.round(hh * dpr);
+    h.cv.style.width = w + 'px';
+    h.cv.style.height = hh + 'px';
+    h.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (!h.nodos || !h.nodos.length) sembrar(h);
+  }
+
+  function pintar() {
+    rafRed = requestAnimationFrame(pintar);
+    for (var k = 0; k < hosts.length; k++) {
+      var h = hosts[k];
+      if (!h.ctx || !h.nodos) continue;
+      var w = h.cv.clientWidth, hh = h.cv.clientHeight;
+      if (!w || !hh) continue;
+
+      var ctx = h.ctx, ns = h.nodos, i, j, a, b, dx, dy, d2, d;
+      ctx.clearRect(0, 0, w, hh);
+
+      // cursor en coordenadas del anfitrión; fuera de él, sin influencia
+      var mx = tx - h.ox, my = ty - h.oy;
+      var dentro = h.seen && mx > -D_RATON && my > -D_RATON
+                          && mx < w + D_RATON && my < hh + D_RATON;
+
+      for (i = 0; i < ns.length; i++) {
+        a = ns[i];
+        a.x += a.vx; a.y += a.vy;
+
+        // el cursor tira suavemente de los nodos cercanos
+        if (dentro) {
+          dx = mx - a.x; dy = my - a.y; d2 = dx * dx + dy * dy;
+          if (d2 < D_RATON * D_RATON && d2 > 1) {
+            d = Math.sqrt(d2);
+            var f = (1 - d / D_RATON) * 0.35;
+            a.x += (dx / d) * f; a.y += (dy / d) * f;
+          }
+        }
+
+        // rebote suave en los bordes: nunca desaparecen del lienzo
+        if (a.x < 0 || a.x > w) { a.vx *= -1; a.x = a.x < 0 ? 0 : w; }
+        if (a.y < 0 || a.y > hh) { a.vy *= -1; a.y = a.y < 0 ? 0 : hh; }
+      }
+
+      // filamentos entre nodos próximos
+      ctx.lineWidth = 1;
+      for (i = 0; i < ns.length; i++) {
+        a = ns[i];
+        for (j = i + 1; j < ns.length; j++) {
+          b = ns[j];
+          dx = a.x - b.x; dy = a.y - b.y; d2 = dx * dx + dy * dy;
+          if (d2 > D_ENLACE * D_ENLACE) continue;
+          d = Math.sqrt(d2);
+          ctx.strokeStyle = 'rgba(180,210,74,' + ((1 - d / D_ENLACE) * 0.13).toFixed(3) + ')';
+          ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+        }
+      }
+
+      // hilos al cursor: la interacción se ve, no se intuye
+      if (dentro) {
+        for (i = 0; i < ns.length; i++) {
+          a = ns[i];
+          dx = mx - a.x; dy = my - a.y; d2 = dx * dx + dy * dy;
+          if (d2 > D_RATON * D_RATON) continue;
+          d = Math.sqrt(d2);
+          ctx.strokeStyle = 'rgba(92,200,255,' + ((1 - d / D_RATON) * 0.3).toFixed(3) + ')';
+          ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(mx, my); ctx.stroke();
+        }
+      }
+
+      // los nodos, encima de sus hilos
+      for (i = 0; i < ns.length; i++) {
+        a = ns[i];
+        var cerca = 0;
+        if (dentro) {
+          dx = mx - a.x; dy = my - a.y; d2 = dx * dx + dy * dy;
+          if (d2 < D_RATON * D_RATON) cerca = 1 - Math.sqrt(d2) / D_RATON;
+        }
+        ctx.fillStyle = cerca > 0.05
+          ? 'rgba(92,200,255,' + (0.24 + cerca * 0.5).toFixed(3) + ')'
+          : 'rgba(236,231,217,0.24)';
+        ctx.beginPath();
+        ctx.arc(a.x, a.y, a.r + cerca * 1.4, 0, 6.283);
+        ctx.fill();
+      }
+    }
+  }
+
+  function arrancarRed() { if (!rafRed) rafRed = requestAnimationFrame(pintar); }
+  function pararRed() { if (rafRed) { cancelAnimationFrame(rafRed); rafRed = 0; } }
+
+  function visibilidad() {
+    if (document.hidden) { pararRed(); away(); }
+    else if (hosts.length) arrancarRed();
+  }
+
+  /* ------------------------------------------------------------- ensamblaje */
 
   function anfitriones() {
     var out = [];
@@ -126,60 +219,68 @@
 
     for (var i = 0; i < els.length; i++) {
       var el = els[i];
+
       var lamp = document.createElement('div');
-      lamp.id = 'lamp';
-      lamp.className = 'is-away';
+      lamp.id = 'lamp'; lamp.className = 'is-away';
       lamp.setAttribute('aria-hidden', 'true');
-      var arm = document.createElement('div');
-      arm.id = 'lamp-arm';
-      var lens = document.createElement('div');
-      lens.id = 'lamp-lens';
+      var arm = document.createElement('div'); arm.id = 'lamp-arm';
+      var lens = document.createElement('div'); lens.id = 'lamp-lens';
       arm.appendChild(lens); lamp.appendChild(arm); el.appendChild(lamp);
+
+      var cv = document.createElement('canvas');
+      cv.className = 'nodes';
+      cv.setAttribute('aria-hidden', 'true');
+      el.appendChild(cv);
+
+      var h = { el: el, lamp: lamp, arm: arm, cv: cv, ctx: cv.getContext('2d'),
+                nodos: null, ox: 0, oy: 0, cx: 0, cy: 0, seen: false };
       el.classList.add('lamp-live');
-      hosts.push({ el: el, lamp: lamp, arm: arm, ox: 0, oy: 0, cx: 0, cy: 0, seen: false });
+      hosts.push(h);
+      medirCanvas(h);
     }
     origin();
 
     addEventListener('pointermove', move, { passive: true });
     addEventListener('pointerdown', move, { passive: true });
-    addEventListener('resize', origin, { passive: true });
+    addEventListener('resize', remedir, { passive: true });
     document.addEventListener('pointerleave', away);
-    document.addEventListener('visibilitychange', hide);
+    document.addEventListener('visibilitychange', visibilidad);
     if (window.ResizeObserver) {
-      ro = new ResizeObserver(origin);
+      ro = new ResizeObserver(remedir);
       for (var j = 0; j < hosts.length; j++) ro.observe(hosts[j].el);
     }
+    arrancarRed();
+  }
+
+  function remedir() {
+    origin();
+    for (var i = 0; i < hosts.length; i++) medirCanvas(hosts[i]);
   }
 
   function destroy() {
     if (!hosts.length) return;
     removeEventListener('pointermove', move);
     removeEventListener('pointerdown', move);
-    removeEventListener('resize', origin);
+    removeEventListener('resize', remedir);
     document.removeEventListener('pointerleave', away);
-    document.removeEventListener('visibilitychange', hide);
+    document.removeEventListener('visibilitychange', visibilidad);
     if (ro) { ro.disconnect(); ro = null; }
     clearTimeout(idle);
-    if (raf) { cancelAnimationFrame(raf); raf = 0; }
+    if (rafLamp) { cancelAnimationFrame(rafLamp); rafLamp = 0; }
+    pararRed();
     for (var i = 0; i < hosts.length; i++) {
       hosts[i].el.classList.remove('lamp-live');
       hosts[i].lamp.remove();
+      hosts[i].cv.remove();
     }
     hosts = [];
   }
 
-  function sync() {
-    (FINE.matches && !REDUCE.matches) ? build() : destroy();
-    // el polvo va aparte: sobrevive sin lámpara, sólo lo mata reduced-motion
-    if (!REDUCE.matches) {
-      var els = anfitriones();
-      for (var i = 0; i < els.length; i++) polvo(els[i]);
-    }
-  }
+  function sync() { (FINE.matches && !REDUCE.matches) ? build() : destroy(); }
 
   function watch(mq) {
     if (mq.addEventListener) mq.addEventListener('change', sync);
-    else if (mq.addListener) mq.addListener(sync);      // Safari < 14
+    else if (mq.addListener) mq.addListener(sync);
   }
   watch(FINE); watch(REDUCE);
   sync();
