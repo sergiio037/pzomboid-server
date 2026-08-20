@@ -1113,7 +1113,11 @@ input[type=range]::-moz-range-thumb{ width:9px; height:18px; border:0; border-ra
 .console,.editor,.console-card{ background:var(--void); }
 
 /* --- 2 · chasis y lámpara también en el login ---------------------------- */
-.login-screen{ position:relative; z-index:0; isolation:isolate; }
+/* OJO: NO tocar `position`. La regla original es `position:fixed; inset:0` y es
+   lo que hace que la pantalla ocupe el viewport entero. Ponerla en `relative`
+   la encogía a la altura de su contenido y el chasis se cortaba a media página.
+   Para crear contexto de apilamiento basta con isolation. */
+.login-screen{ isolation:isolate; }
 .login-screen::after{
   content:""; position:absolute; inset:0; z-index:-1; pointer-events:none;
   background-image:
